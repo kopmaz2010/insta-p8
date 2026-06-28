@@ -184,7 +184,29 @@ export async function POST(request: NextRequest) {
             if (match) {
               console.log(`[v0] ✅ Comment Match: "${match.name}" (ID: ${match.id})`)
               const content = match.response_content
-              const replies = ["Check your DMs! 📥", "Sent! 🔥", "Check inbox! ✨"]
+                            // === GERCEK FOLLOW GATE (yorum tetiklemeli kurallar) ===
+              if (content.check_follow === true) {
+                let follows = false
+                try {
+                  const fr = await fetch(
+                    `https://graph.instagram.com/v24.0/${senderId}?fields=is_user_follow_business&access_token=${encodeURIComponent(user.access_token)}`
+                  )
+                  const fj = await fr.json()
+                  follows = fj.is_user_follow_business === true
+                  console.log(`[v0] 🔒 Follow check ${senderId}: ${follows}`)
+                } catch (e) { console.error("[v0] follow check failed", e) }
+                if (!follows) {
+                  await fetch(
+                    `https://graph.instagram.com/v24.0/me/messages?access_token=${encodeURIComponent(user.access_token)}`,
+                    { method: "POST", headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ recipient: { comment_id: commentId },
+                        message: { text: `Linki gonderebilmem icin once @${user.username} hesabini takip etmen gerekiyor 🙌 Takip ettikten sonra yorumunu tekrar yaz, linki hemen gondereyim!` } }) }
+                  )
+                  continue
+                }
+              }
+              // === /FOLLOW GATE ===
+              const replies = ["DM'ne bak! 📩", "Gönderdim, DM'ni kontrol et! 🔥", "DM kutuna düştü! ✨"]
               const randomReply = replies[Math.floor(Math.random() * replies.length)]
 
               // Public Reply
