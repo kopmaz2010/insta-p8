@@ -447,3 +447,4 @@ Stars help more developers discover open-source Instagram automation, self-hoste
 ## 📄 License
 
 MIT License. Use it, fork it, self-host it, customize it, and build on top of it.
+
