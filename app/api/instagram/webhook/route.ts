@@ -544,30 +544,38 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          // Follow Gate Logic
-          const isUnlockEvent = triggerType === "postback" && triggerValue.startsWith("UNLOCK_CONTENT_")
-          if (content.check_follow === true && !isUnlockEvent) {
-            replyTextLog = "[Locked Content Gate]"
-            apiBody.message = {
-              attachment: {
-                type: "template",
-                payload: {
-                  template_type: "generic",
-                  elements: [
-                    {
-                      title: "🔒 Content Locked",
-                      subtitle: `Please follow @${user.username} to see this!`,
-                      buttons: [
-                        { type: "web_url", url: `https://instagram.com/${user.username}`, title: "Follow Us" },
-                        { type: "postback", title: "I Followed! ✅", payload: `UNLOCK_CONTENT_${match.id}` },
-                      ],
-                    },
-                  ],
+                 // Follow Gate Logic (GERCEK takip kontrolu — butonda da dogrular)
+          if (content.check_follow === true) {
+            let follows = false
+            try {
+              const fr = await fetch(
+                `https://graph.instagram.com/v24.0/${senderId}?fields=is_user_follow_business&access_token=${encodeURIComponent(user.access_token)}`
+              )
+              const fj = await fr.json()
+              follows = fj.is_user_follow_business === true
+            } catch (e) { console.error("[v0] follow check failed", e) }
+            if (!follows) {
+              replyTextLog = "[Takip Kapisi]"
+              apiBody.message = {
+                attachment: {
+                  type: "template",
+                  payload: {
+                    template_type: "generic",
+                    elements: [
+                      {
+                        title: "Takipcilere ozel icerik 🔒",
+                        subtitle: `Once @${user.username} hesabini takip et, sonra butona bas!`,
+                        buttons: [
+                          { type: "web_url", url: `https://instagram.com/${user.username}`, title: "Profile Git" },
+                          { type: "postback", title: "TAKIP ETTIM 🙌", payload: `UNLOCK_CONTENT_${match.id}` },
+                        ],
+                      },
+                    ],
+                  },
                 },
-              },
+              }
             }
           }
-
           // SEND REPLY
           try {
             const res = await fetch(
