@@ -184,7 +184,7 @@ export async function POST(request: NextRequest) {
             if (match) {
               console.log(`[v0] ✅ Comment Match: "${match.name}" (ID: ${match.id})`)
               const content = match.response_content
-                            // === GERCEK FOLLOW GATE (yorum tetiklemeli kurallar) ===
+                         // === GERCEK FOLLOW GATE (yorum tetiklemeli kurallar) ===
               if (content.check_follow === true) {
                 let follows = false
                 try {
@@ -193,14 +193,20 @@ export async function POST(request: NextRequest) {
                   )
                   const fj = await fr.json()
                   follows = fj.is_user_follow_business === true
-                  console.log(`[v0] 🔒 Follow check ${senderId}: ${follows}`)
                 } catch (e) { console.error("[v0] follow check failed", e) }
                 if (!follows) {
                   await fetch(
                     `https://graph.instagram.com/v24.0/me/messages?access_token=${encodeURIComponent(user.access_token)}`,
                     { method: "POST", headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ recipient: { comment_id: commentId },
-                        message: { text: `Linki gonderebilmem icin once @${user.username} hesabini takip etmen gerekiyor 🙌 Takip ettikten sonra yorumunu tekrar yaz, linki hemen gondereyim!` } }) }
+                        message: { attachment: { type: "template", payload: { template_type: "generic", elements: [{
+                          title: "Takipcilere ozel icerik 🔒",
+                          subtitle: `Once @${user.username} hesabini takip et, sonra butona bas!`,
+                          buttons: [
+                            { type: "web_url", url: `https://instagram.com/${user.username}`, title: "Profile Git" },
+                            { type: "postback", title: "TAKIP ETTIM 🙌", payload: `UNLOCK_CONTENT_${match.id}` }
+                          ]
+                        }] } } } }) }
                   )
                   continue
                 }
