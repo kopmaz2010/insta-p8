@@ -16,18 +16,15 @@ export function LandingPage() {
       </div>
 
       <nav className="relative z-50 h-20 flex items-center justify-between px-6 md:px-12 border-b border-white/5">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-white text-black rounded-lg flex items-center justify-center">
-            <Zap className="w-4 h-4" />
-          </div>
-          <span className="text-lg font-bold tracking-tight">InstaAuto</span>
+        <div className="flex items-center">
+          <img src="/fabrika-logo.png" alt="Fabrika Müzik" className="h-12 w-auto" />
         </div>
         <Button
           onClick={handleLogin}
           variant="outline"
           className="border-white/20 rounded-full px-6 text-xs font-bold uppercase tracking-widest hover:bg-white hover:text-black transition-all bg-transparent"
         >
-          Login
+          Giriş
         </Button>
       </nav>
 
@@ -35,19 +32,25 @@ export function LandingPage() {
         <div className="max-w-3xl mx-auto text-center space-y-8">
           <div className="inline-flex items-center gap-2 bg-white/5 border border-white/10 rounded-full px-4 py-1.5 text-xs text-neutral-400">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            Instagram Automation Tool
+            Collective Üyelerine Özel
           </div>
 
           <h1 className="text-5xl md:text-7xl font-bold tracking-tight leading-[1.1]">
-            Auto Reply.
+            Sen Müziğini Yap.
             <br />
-            <span className="text-neutral-500">Auto Grow.</span>
+            <span className="text-neutral-500">Cevapları Biz Veririz.</span>
           </h1>
 
+          <img
+            src="/fabrika-collective.png"
+            alt="Fabrika Müzik — New Generation Music Collective"
+            className="h-10 md:h-12 w-auto mx-auto opacity-90"
+          />
+
           <p className="text-lg text-neutral-500 max-w-lg mx-auto leading-relaxed">
-            Set keyword triggers on comments & DMs. 
-            Let <strong className="text-white">InstaAuto</strong> handle the replies — 
-            so you can focus on creating content.
+            Yorumlara ve DM'lere anahtar kelime tetikleyicileri kur.
+            Cevapları <strong className="text-white">Fabrika Müzik</strong> otomasyonu halletsin —
+            sen müziğine odaklan.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
@@ -55,7 +58,7 @@ export function LandingPage() {
               onClick={handleLogin}
               className="bg-white text-black h-14 px-10 rounded-full font-bold text-sm hover:scale-105 transition-transform shadow-lg shadow-white/10"
             >
-              Connect Instagram
+              Instagram'ı Bağla
             </Button>
           </div>
         </div>
@@ -64,18 +67,18 @@ export function LandingPage() {
         <div className="max-w-4xl mx-auto mt-24 grid md:grid-cols-3 gap-4">
           <FeatureCard
             icon={<MessageCircle className="w-5 h-5" />}
-            title="Comment & DM Replies"
-            description="Auto-reply to keywords in comments and direct messages instantly."
+            title="Yorum & DM Cevapları"
+            description="Yorumlardaki ve mesajlardaki anahtar kelimelere anında otomatik cevap."
           />
           <FeatureCard
             icon={<Shield className="w-5 h-5" />}
-            title="Follow Gate"
-            description="Only reply to followers — grow your community the smart way."
+            title="Takip Kapısı"
+            description="Linkler sadece takipçilere gitsin — topluluğunu akıllıca büyüt."
           />
           <FeatureCard
             icon={<Clock className="w-5 h-5" />}
-            title="Always On"
-            description="Works 24/7. Never miss a lead, even when you're sleeping."
+            title="7/24 Açık"
+            description="Sen sahnedeyken de çalışır. Hiçbir fırsat kaçmaz."
           />
         </div>
       </main>

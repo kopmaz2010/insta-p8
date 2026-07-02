@@ -21,14 +21,9 @@ export function Sidebar({ className, username = "Demo User", onLogout, onNavigat
 
   return (
     <aside className={cn("flex flex-col", className)} {...props}>
-      <div className="p-6 flex items-center gap-3">
-        <div className="w-8 h-8 bg-white text-black rounded-lg flex items-center justify-center">
-          <Instagram className="w-5 h-5" />
-        </div>
-        <div>
-          <h2 className="font-bold text-base tracking-tight text-white leading-none">InstaAuto</h2>
-          <span className="text-[10px] uppercase font-bold text-neutral-500 tracking-widest">Pro</span>
-        </div>
+      <div className="p-6 flex flex-col items-start gap-2">
+        <img src="/fabrika-logo.png" alt="Fabrika Müzik" className="h-14 w-auto object-contain" />
+        <span className="text-[9px] uppercase font-bold text-neutral-500 tracking-widest">New Generation Collective</span>
       </div>
 
       <div className="flex-1 px-4 space-y-2 py-4">
@@ -97,7 +92,7 @@ export function Sidebar({ className, username = "Demo User", onLogout, onNavigat
             <p className="text-xs font-bold text-white truncate">{username}</p>
             <div className="flex items-center gap-1">
               <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-              <p className="text-[10px] text-neutral-500">Pro Plan</p>
+              <p className="text-[10px] text-neutral-500">Collective Üyesi</p>
             </div>
           </div>
           <Button

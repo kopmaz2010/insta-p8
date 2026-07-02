@@ -9,8 +9,8 @@ const _geist = Geist({ subsets: ["latin"] })
 const _geistMono = Geist_Mono({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "InstaAuto — Instagram Automation",
-  description: "Auto-reply to comments, DMs, and stories with keyword triggers.",
+  title: "Fabrika Müzik — Instagram Otomasyonu",
+  description: "Fabrika Müzik New Generation Collective üyelerine özel Instagram otomasyonu.",
   icons: {
     icon: [
       {
@@ -36,7 +36,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
+    <html lang="tr">
       <body className={`font-sans antialiased`}>
         {children}
         <Analytics />
