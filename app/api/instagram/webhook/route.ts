@@ -2,8 +2,51 @@
 
 import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
+import crypto from "crypto"
+
+export const maxDuration = 60
 
 const WEBHOOK_VERIFY_TOKEN = process.env.INSTAGRAM_WEBHOOK_VERIFY_TOKEN || "your_verify_token"
+const DAILY_DM_LIMIT = Number(process.env.DAILY_DM_LIMIT || 150)
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+// FAZ1-A4: Meta webhook imzasini dogrula (x-hub-signature-256)
+function validSignature(rawBody: string, header: string | null): boolean {
+  const secret = process.env.INSTAGRAM_APP_SECRET
+  if (!secret) return true // env eksikse kurulumu bozma
+  if (!header) return false
+  const expected = "sha256=" + crypto.createHmac("sha256", secret).update(rawBody).digest("hex")
+  const a = Buffer.from(header)
+  const b = Buffer.from(expected)
+  return a.length === b.length && crypto.timingSafeEqual(a, b)
+}
+
+// FAZ1-A5: event'i sahiplen — ayni anahtar ikinci kez gelirse false (dedup)
+async function claimEvent(supabase: any, key: string, type: string, userId: any): Promise<boolean> {
+  const { error } = await supabase.from("webhook_events").insert({ event_key: key, event_type: type, user_id: userId })
+  if (!error) return true
+  if (error.code === "23505") return false // zaten islenmis
+  console.error("[v0] claimEvent hatasi:", error)
+  return true // dedup altyapisi dusarse akisi durdurma
+}
+
+// FAZ1: hesap basina gunluk gonderim limiti
+async function underDailyLimit(supabase: any, userId: any): Promise<boolean> {
+  const dayStart = new Date()
+  dayStart.setUTCHours(0, 0, 0, 0)
+  const { count, error } = await supabase
+    .from("webhook_events")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .like("event_type", "send%")
+    .gte("processed_at", dayStart.toISOString())
+  if (error) {
+    console.error("[v0] limit kontrol hatasi:", error)
+    return true
+  }
+  return (count || 0) < DAILY_DM_LIMIT
+}
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams
@@ -19,7 +62,12 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
+    const rawBody = await request.text()
+    if (!validSignature(rawBody, request.headers.get("x-hub-signature-256"))) {
+      console.error("[v0] 🔴 Gecersiz webhook imzasi — reddedildi")
+      return NextResponse.json({ error: "invalid signature" }, { status: 403 })
+    }
+    const body = JSON.parse(rawBody)
     if (!body.entry) return NextResponse.json({ ok: true })
     const supabase = await getSupabaseServerClient()
 
@@ -184,7 +232,18 @@ export async function POST(request: NextRequest) {
             if (match) {
               console.log(`[v0] ✅ Comment Match: "${match.name}" (ID: ${match.id})`)
               const content = match.response_content
-                         // === GERCEK FOLLOW GATE (yorum tetiklemeli kurallar) ===
+
+              // --- FAZ1: ayni yorumu iki kez isleme (Meta retry korumasi) ---
+              if (!(await claimEvent(supabase, `comment_${commentId}`, "recv_comment", user.id))) {
+                console.log(`[v0] ⏭️ Tekrarlanan yorum eventi, atlandi: ${commentId}`)
+                continue
+              }
+              // --- FAZ1: hesap bazli gunluk DM limiti ---
+              if (!(await underDailyLimit(supabase, user.id))) {
+                console.log(`[v0] 🛑 Gunluk DM limiti doldu (${user.username}), atlandi`)
+                continue
+              }
+              // === GERCEK FOLLOW GATE (yorum tetiklemeli kurallar) ===
               if (content.check_follow === true) {
                 let follows = false
                 try {
@@ -195,6 +254,12 @@ export async function POST(request: NextRequest) {
                   follows = fj.is_user_follow_business === true
                 } catch (e) { console.error("[v0] follow check failed", e) }
                 if (!follows) {
+                  const gd = new Date().toISOString().slice(0, 10)
+                  if (!(await claimEvent(supabase, `gate_${match.id}_${senderId}_${gd}`, "send_gate", user.id))) {
+                    console.log(`[v0] ⏭️ Takip karti bugun zaten gitti: ${senderId}`)
+                    continue
+                  }
+                  await sleep(1500 + Math.random() * 2500)
                   await fetch(
                     `https://graph.instagram.com/v24.0/me/messages?access_token=${encodeURIComponent(user.access_token)}`,
                     { method: "POST", headers: { "Content-Type": "application/json" },
@@ -212,6 +277,16 @@ export async function POST(request: NextRequest) {
                 }
               }
               // === /FOLLOW GATE ===
+
+              // --- FAZ1: ayni kisiye ayni kuraldan gunde 1 teslimat ---
+              const dgun = new Date().toISOString().slice(0, 10)
+              if (!(await claimEvent(supabase, `once_${match.id}_${senderId}_${dgun}`, "send_dm", user.id))) {
+                console.log(`[v0] ⏭️ Bugun zaten teslim edildi (kural ${match.id} → ${senderId})`)
+                continue
+              }
+              // --- FAZ1: insani gecikme ---
+              await sleep(1500 + Math.random() * 2500)
+
               const replies = ["DM'ne bak! 📩", "Gönderdim, DM'ni kontrol et! 🔥", "DM kutuna düştü! ✨"]
               const randomReply = replies[Math.floor(Math.random() * replies.length)]
 
@@ -231,6 +306,8 @@ export async function POST(request: NextRequest) {
               } catch (e) {
                 console.error("[v0] 🔴 Public Reply Network Error:", e)
               }
+
+              await sleep(800 + Math.random() * 1200)
 
               // Private Reply (DM)
               const apiBody: any = { recipient: { comment_id: commentId } }
@@ -415,6 +492,13 @@ export async function POST(request: NextRequest) {
 
           console.log(`[v0] 📩 DM from ${senderId}: "${triggerValue}"`)
 
+          // --- FAZ1: ayni mesaj/postback eventini iki kez isleme ---
+          const evKey = event.message?.mid ? `mid_${event.message.mid}` : `pb_${senderId}_${event.timestamp ?? Date.now()}`
+          if (!(await claimEvent(supabase, evKey, "recv_dm", user.id))) {
+            console.log(`[v0] ⏭️ Tekrarlanan DM eventi, atlandi`)
+            continue
+          }
+
           // ============================================================
           // 💾 1. SAVE INCOMING MESSAGE (Live Inbox Logic)
           // ============================================================
@@ -576,6 +660,14 @@ export async function POST(request: NextRequest) {
               }
             }
           }
+          // --- FAZ1: gunluk limit + insani gecikme ---
+          if (!(await underDailyLimit(supabase, user.id))) {
+            console.log(`[v0] 🛑 Gunluk DM limiti doldu (${user.username}), cevap atlandi`)
+            continue
+          }
+          await claimEvent(supabase, `send_${evKey}`, "send_dm", user.id)
+          await sleep(1200 + Math.random() * 2300)
+
           // SEND REPLY
           try {
             const res = await fetch(

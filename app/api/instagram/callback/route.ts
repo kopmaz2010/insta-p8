@@ -71,28 +71,42 @@ export async function POST(request: NextRequest) {
     const accessToken = longData.access_token || shortToken
     const expiresIn = longData.expires_in || 5184000
 
+    // FAZ1-A1: hesabi comments+messages webhook'una OTOMATIK abone et
+    try {
+      const subRes = await fetch(
+        `https://graph.instagram.com/v23.0/me/subscribed_apps?subscribed_fields=comments,messages&access_token=${encodeURIComponent(accessToken)}`,
+        { method: "POST" },
+      )
+      const subJson = await subRes.json()
+      console.log("[v0] 🔔 Webhook aboneligi:", JSON.stringify(subJson))
+    } catch (e) {
+      console.error("[v0] 🔴 Webhook aboneligi basarisiz:", e)
+    }
+
     // 4. Get Username + IG Professional Account ID (webhook-matching ID)
     // Per Meta docs: /me?fields=user_id returns the IG_ID that matches webhook entry.id
     // https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/get-started
     let username = `user_${loginUserId}`
     let businessAccountId = loginUserId // fallback
 
-    try {
-      const meRes = await fetch(
-        `https://graph.instagram.com/v24.0/me?fields=user_id,username&access_token=${accessToken}`
-      )
-      const meData = await meRes.json()
-      console.log("[v0] 📋 /me response:", JSON.stringify(meData))
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const meRes = await fetch(
+          `https://graph.instagram.com/v24.0/me?fields=user_id,username&access_token=${accessToken}`
+        )
+        const meData = await meRes.json()
+        console.log(`[v0] 📋 /me response (deneme ${attempt}):`, JSON.stringify(meData))
 
-      if (meData.username) username = meData.username
-      if (meData.user_id) {
-        businessAccountId = meData.user_id.toString()
-        console.log(`[v0] 🎯 Got IG Professional Account ID (user_id): ${businessAccountId}`)
-      } else {
-        console.warn(`[v0] ⚠️ /me did not return user_id, using loginUserId: ${loginUserId}`)
+        if (meData.username) username = meData.username
+        if (meData.user_id) {
+          businessAccountId = meData.user_id.toString()
+          console.log(`[v0] 🎯 IG Professional Account ID: ${businessAccountId}`)
+          break
+        }
+      } catch (e) {
+        console.error(`[v0] /me denemesi ${attempt} basarisiz:`, e)
       }
-    } catch (e) {
-      console.error("[v0] /me request failed:", e)
+      await new Promise((r) => setTimeout(r, 1000))
     }
 
     // 6. Save/Update User
