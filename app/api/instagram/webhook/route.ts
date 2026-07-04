@@ -3,6 +3,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
 import crypto from "crypto"
+import { awardCommentPoints, handleGamificationDM, isOptedOut, underHourlyLimit } from "@/lib/gamification"
 
 export const maxDuration = 60
 
@@ -243,6 +244,16 @@ export async function POST(request: NextRequest) {
                 console.log(`[v0] 🛑 Gunluk DM limiti doldu (${user.username}), atlandi`)
                 continue
               }
+              // --- G1 POLITIKA: saatlik gonderim tavani ---
+              if (!(await underHourlyLimit(supabase, user.id))) {
+                console.log(`[v0] 🛑 Saatlik DM limiti doldu (${user.username}), atlandi`)
+                continue
+              }
+              // --- G1 POLITIKA: DURDUR demis kullaniciya otomatik mesaj yok ---
+              if (await isOptedOut(supabase, user.id, senderId)) {
+                console.log(`[v0] ⏭️ Opt-out kullanici (${senderId}), yorum cevabi atlandi`)
+                continue
+              }
               // === GERCEK FOLLOW GATE (yorum tetiklemeli kurallar) ===
               if (content.check_follow === true) {
                 let follows = false
@@ -278,6 +289,17 @@ export async function POST(request: NextRequest) {
               }
               // === /FOLLOW GATE ===
 
+              // --- G1: yoruma puan (benzersiz eylem + gunluk tavan + takip sarti) ---
+              // once_ dedup'indan ONCE calisir: DM bugun zaten gittiyse bile farkli
+              // gonderiye yapilan benzersiz yorum puan kazandirir (event_key korumali).
+              const award = await awardCommentPoints({
+                supabase,
+                user,
+                senderId,
+                commentId,
+                username: change.value.from?.username,
+              })
+
               // --- FAZ1: ayni kisiye ayni kuraldan gunde 1 teslimat ---
               const dgun = new Date().toISOString().slice(0, 10)
               if (!(await claimEvent(supabase, `once_${match.id}_${senderId}_${dgun}`, "send_dm", user.id))) {
@@ -288,7 +310,8 @@ export async function POST(request: NextRequest) {
               await sleep(1500 + Math.random() * 2500)
 
               const replies = ["DM'ne bak! 📩", "Gönderdim, DM'ni kontrol et! 🔥", "DM kutuna düştü! ✨"]
-              const randomReply = replies[Math.floor(Math.random() * replies.length)]
+              let randomReply = replies[Math.floor(Math.random() * replies.length)]
+              if (award) randomReply += ` ⭐ +${award.pts} puan kazandın, DM'den "PUAN" yaz!`
 
               // Public Reply
               try {
@@ -480,7 +503,11 @@ export async function POST(request: NextRequest) {
           let triggerType = "",
             triggerValue = ""
 
-          if (event.message?.text) {
+          if (event.message?.quick_reply?.payload) {
+            // G1: quick reply tiklamasi text olarak da gelir — payload oncelikli
+            triggerType = "postback"
+            triggerValue = event.message.quick_reply.payload
+          } else if (event.message?.text) {
             triggerType = "keyword"
             triggerValue = event.message.text.toLowerCase().trim()
           } else if (event.postback?.payload) {
@@ -563,6 +590,31 @@ export async function POST(request: NextRequest) {
             console.error("[v0] Failed to save incoming message DB", err)
           }
           // ============================================================
+
+          // ============================================================
+          // ⭐ G1 OYUNLASTIRMA: PUAN/ÖDÜLLER/DURDUR komutlari + ODUL_/SHOW_ payload
+          // ============================================================
+          try {
+            const gamiHandled = await handleGamificationDM({
+              supabase,
+              user,
+              senderId,
+              kind: triggerType === "postback" ? "payload" : "text",
+              value: triggerValue,
+              evKey,
+              claimEvent,
+              underDailyLimit,
+            })
+            if (gamiHandled) continue
+          } catch (e) {
+            console.error("[v0] Oyunlastirma handler hatasi:", e)
+          }
+
+          // --- G1 POLITIKA: DURDUR demis kullaniciya otomatik cevap yok ---
+          if (await isOptedOut(supabase, user.id, senderId)) {
+            console.log(`[v0] ⏭️ Opt-out kullanici (${senderId}), otomasyon cevabi atlandi`)
+            continue
+          }
 
           let match = null
           if (triggerType === "postback") {
@@ -663,6 +715,11 @@ export async function POST(request: NextRequest) {
           // --- FAZ1: gunluk limit + insani gecikme ---
           if (!(await underDailyLimit(supabase, user.id))) {
             console.log(`[v0] 🛑 Gunluk DM limiti doldu (${user.username}), cevap atlandi`)
+            continue
+          }
+          // --- G1 POLITIKA: saatlik gonderim tavani ---
+          if (!(await underHourlyLimit(supabase, user.id))) {
+            console.log(`[v0] 🛑 Saatlik DM limiti doldu (${user.username}), cevap atlandi`)
             continue
           }
           await claimEvent(supabase, `send_${evKey}`, "send_dm", user.id)
