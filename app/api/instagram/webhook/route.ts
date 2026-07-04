@@ -3,12 +3,25 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
 import crypto from "crypto"
-import { awardCommentPoints, awardStoryPoints, handleGamificationDM, isOptedOut, underHourlyLimit } from "@/lib/gamification"
+import {
+  awardCommentPoints,
+  awardReactionPoints,
+  awardStoryPoints,
+  handleGamificationDM,
+  isEmojiExpression,
+  isOptedOut,
+  rateLimitCoolingDown,
+  recordRateLimitHit,
+  underHourlyLimit,
+} from "@/lib/gamification"
 
 export const maxDuration = 60
 
 const WEBHOOK_VERIFY_TOKEN = process.env.INSTAGRAM_WEBHOOK_VERIFY_TOKEN || "your_verify_token"
-const DAILY_DM_LIMIT = Number(process.env.DAILY_DM_LIMIT || 150)
+// SPAM (bkz. Vibe-Coding/INSTAGRAM-LIMIT-ARASTIRMASI.md): davranissal guvenli hacim
+// isinmis hesap icin 100-150/gun — varsayilani muhafazakar 120'ye cektik (Katman 2).
+// Katman 1 resmi tavan (750 private-reply/saat) HOURLY_DM_LIMIT=40 ile zaten cok altta.
+const DAILY_DM_LIMIT = Number(process.env.DAILY_DM_LIMIT || 120)
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -254,6 +267,11 @@ export async function POST(request: NextRequest) {
                 console.log(`[v0] ⏭️ Opt-out kullanici (${senderId}), yorum cevabi atlandi`)
                 continue
               }
+              // --- SPAM: devre kesici — yakin zamanda Meta rate hatasi varsa gonderme ---
+              if (await rateLimitCoolingDown(supabase, user.id)) {
+                console.log(`[v0] 🧯 Rate sogutmasi aktif (${user.username}), yorum cevabi atlandi`)
+                continue
+              }
               // === GERCEK FOLLOW GATE (yorum tetiklemeli kurallar) ===
               if (content.check_follow === true) {
                 let follows = false
@@ -324,13 +342,15 @@ export async function POST(request: NextRequest) {
                   },
                 )
                 const pubJson = await pubRes.json()
-                if (pubJson.error) console.error("[v0] 🔴 Public Reply Failed:", JSON.stringify(pubJson.error))
-                else console.log("[v0] 🟢 Public Reply Sent!", pubJson)
+                if (pubJson.error) {
+                  console.error("[v0] 🔴 Public Reply Failed:", JSON.stringify(pubJson.error))
+                  await recordRateLimitHit(supabase, user.id, pubJson.error)
+                } else console.log("[v0] 🟢 Public Reply Sent!", pubJson)
               } catch (e) {
                 console.error("[v0] 🔴 Public Reply Network Error:", e)
               }
 
-              await sleep(800 + Math.random() * 1200)
+              await sleep(1500 + Math.random() * 2500)
 
               // Private Reply (DM)
               const apiBody: any = { recipient: { comment_id: commentId } }
@@ -374,8 +394,10 @@ export async function POST(request: NextRequest) {
                   { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(apiBody) },
                 )
                 const dmJson = await dmRes.json()
-                if (dmJson.error) console.error("[v0] 🔴 Private DM Failed:", JSON.stringify(dmJson.error))
-                else console.log("[v0] 🟢 Private DM Sent!", dmJson)
+                if (dmJson.error) {
+                  console.error("[v0] 🔴 Private DM Failed:", JSON.stringify(dmJson.error))
+                  await recordRateLimitHit(supabase, user.id, dmJson.error)
+                } else console.log("[v0] 🟢 Private DM Sent!", dmJson)
               } catch (e) {
                 console.error("[v0] 🔴 Private DM Network Error:", e)
               }
@@ -395,15 +417,19 @@ export async function POST(request: NextRequest) {
           // Skip system events
           if (event.read || event.delivery || event.message?.is_echo || senderId === recipientId) continue
 
-          // G2: story tepkisine puan (varsayilan KAPALI — settings.story_enabled;
-          // Meta'nin 50k+ takipci sarti dogrulaninca acilacak). Otomasyon eslesmesinden bagimsiz.
-          if (event.reaction?.mid && event.reaction.action !== "unreact") {
-            await awardStoryPoints({
-              supabase,
-              user,
-              senderId,
-              eventKey: `pt_story_${event.reaction.mid}_${senderId}`,
-            })
+          if (event.reaction && event.reaction.action !== "unreact") {
+            // G2b: mesaja/story'ye emoji tepkisi = ifade puani (kisi basi gunde 1)
+            await awardReactionPoints({ supabase, user, senderId })
+            // G2: story tepkisine ek puan (varsayilan KAPALI — settings.story_enabled;
+            // Meta'nin 50k+ takipci sarti dogrulaninca acilacak)
+            if (event.reaction.mid) {
+              await awardStoryPoints({
+                supabase,
+                user,
+                senderId,
+                eventKey: `pt_story_${event.reaction.mid}_${senderId}`,
+              })
+            }
           }
 
           // Filter story automations only
@@ -634,6 +660,13 @@ export async function POST(request: NextRequest) {
             continue
           }
 
+          // --- G2b: emoji/hizli-ifade mesaji → kisi basi gunde 1 puan ---
+          // (story hizli ifadeleri de metin olarak buraya duser)
+          if (triggerType === "keyword" && isEmojiExpression(triggerValue)) {
+            await awardReactionPoints({ supabase, user, senderId })
+            continue
+          }
+
           let match = null
           if (triggerType === "postback") {
             if (triggerValue.startsWith("UNLOCK_CONTENT_")) {
@@ -740,8 +773,13 @@ export async function POST(request: NextRequest) {
             console.log(`[v0] 🛑 Saatlik DM limiti doldu (${user.username}), cevap atlandi`)
             continue
           }
+          // --- SPAM: devre kesici ---
+          if (await rateLimitCoolingDown(supabase, user.id)) {
+            console.log(`[v0] 🧯 Rate sogutmasi aktif (${user.username}), cevap atlandi`)
+            continue
+          }
           await claimEvent(supabase, `send_${evKey}`, "send_dm", user.id)
-          await sleep(1200 + Math.random() * 2300)
+          await sleep(2000 + Math.random() * 4000)
 
           // SEND REPLY
           try {
@@ -750,8 +788,10 @@ export async function POST(request: NextRequest) {
               { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(apiBody) },
             )
             const json = await res.json()
-            if (json.error) console.error("[v0] 🔴 Reply Failed:", json.error)
-            else {
+            if (json.error) {
+              console.error("[v0] 🔴 Reply Failed:", json.error)
+              await recordRateLimitHit(supabase, user.id, json.error)
+            } else {
               console.log("[v0] 🟢 Reply Sent!")
 
               // ============================================================

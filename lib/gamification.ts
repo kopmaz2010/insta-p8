@@ -35,9 +35,28 @@ export async function getGamificationSettings(supabase: any, userId: any) {
   return data
 }
 
+// IGSID'den gercek kullanici adini cek (liderlik tablosunda "Gizli Üye" kalmasin)
+async function fetchIgUsername(accessToken: string, igsid: any): Promise<string | null> {
+  try {
+    const r = await fetch(`${GRAPH}/${igsid}?fields=username&access_token=${encodeURIComponent(accessToken)}`)
+    const j = await r.json()
+    return j?.username || null
+  } catch {
+    return null
+  }
+}
+
 // IGSID -> uye kaydi (yoksa olustur). Puan dogrulanmis IGSID'ye baglanir (multi-accounting korumasi).
-export async function resolveMember(supabase: any, userId: any, igsid: any, username: string | null = null) {
+// username bos kalirsa accessToken ile Graph'tan cekilir ve kayda islenir.
+export async function resolveMember(
+  supabase: any,
+  userId: any,
+  igsid: any,
+  username: string | null = null,
+  accessToken: string | null = null,
+) {
   const igsidStr = String(igsid)
+  let member: any = null
   const { data: existing } = await supabase
     .from("loyalty_members")
     .select("*")
@@ -45,31 +64,41 @@ export async function resolveMember(supabase: any, userId: any, igsid: any, user
     .eq("igsid", igsidStr)
     .single()
   if (existing) {
-    if (username && !existing.username) {
-      await supabase.from("loyalty_members").update({ username }).eq("id", existing.id)
+    member = existing
+  } else {
+    const { data: created, error } = await supabase
+      .from("loyalty_members")
+      .insert({ user_id: userId, igsid: igsidStr, username })
+      .select("*")
+      .single()
+    if (error) {
+      if (error.code === "23505") {
+        // es zamanli iki webhook ayni uyeyi olusturmaya calisti — mevcut olani al
+        const { data: again } = await supabase
+          .from("loyalty_members")
+          .select("*")
+          .eq("user_id", userId)
+          .eq("igsid", igsidStr)
+          .single()
+        member = again
+      } else {
+        console.error("[v0] resolveMember hatasi:", error)
+        return null
+      }
+    } else {
+      member = created
     }
-    return existing
   }
-  const { data: created, error } = await supabase
-    .from("loyalty_members")
-    .insert({ user_id: userId, igsid: igsidStr, username })
-    .select("*")
-    .single()
-  if (error) {
-    if (error.code === "23505") {
-      // es zamanli iki webhook ayni uyeyi olusturmaya calisti — mevcut olani al
-      const { data: again } = await supabase
-        .from("loyalty_members")
-        .select("*")
-        .eq("user_id", userId)
-        .eq("igsid", igsidStr)
-        .single()
-      return again
+  if (!member) return null
+  // kullanici adi backfill: payload'dan geldiyse onu, yoksa Graph'tan cek
+  if (!member.username) {
+    const resolved = username || (accessToken ? await fetchIgUsername(accessToken, igsidStr) : null)
+    if (resolved) {
+      await supabase.from("loyalty_members").update({ username: resolved }).eq("id", member.id)
+      member.username = resolved
     }
-    console.error("[v0] resolveMember hatasi:", error)
-    return null
   }
-  return created
+  return member
 }
 
 // Var olan uyeyi getir — OLUSTURMAZ (alakasiz her DM icin kayit acilmasin diye)
@@ -104,7 +133,9 @@ export async function underHourlyLimit(supabase: any, userId: any): Promise<bool
   return (count || 0) < HOURLY_DM_LIMIT
 }
 
-// Gunluk puan-eylem tavani — sabit UTC gununde sifirlanir (rolling window degil)
+// Gunluk puan-eylem tavani — sabit UTC gununde sifirlanir (rolling window degil).
+// Yalnizca yorum/story eylemlerini sayar; quiz (uye basi 1 cevap), referral (1 kez)
+// ve ifade (gunde 1, kendi anahtariyla) zaten kendi kilitlerine sahip.
 async function underDailyActionCap(supabase: any, memberId: string, cap: number): Promise<boolean> {
   const dayStart = new Date()
   dayStart.setUTCHours(0, 0, 0, 0)
@@ -112,9 +143,52 @@ async function underDailyActionCap(supabase: any, memberId: string, cap: number)
     .from("point_buckets")
     .select("id", { count: "exact", head: true })
     .eq("member_id", memberId)
+    .in("reason", ["comment", "story"])
     .gte("earned_at", dayStart.toISOString())
   if (error) return true
   return (count || 0) < cap
+}
+
+// ============================================================
+// SPAM KORUMASI — devre kesici (bkz. Vibe-Coding/INSTAGRAM-LIMIT-ARASTIRMASI.md §4.2/4)
+// Meta rate-limit hatasi gorulunce 30 dk tum gonderimler durur; sabit sayiya
+// guvenmek yerine hataya gore esneme (graceful degradation).
+// ============================================================
+const RATE_COOLDOWN_MIN = 30
+const META_RATE_CODES = [4, 17, 32, 613] // app/user throttle kodlari
+
+export async function rateLimitCoolingDown(supabase: any, userId: any): Promise<boolean> {
+  const since = new Date(Date.now() - RATE_COOLDOWN_MIN * 60_000).toISOString()
+  const { count, error } = await supabase
+    .from("webhook_events")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("event_type", "flag_rate")
+    .gte("processed_at", since)
+  if (error) return false
+  return (count || 0) > 0
+}
+
+export async function recordRateLimitHit(supabase: any, userId: any, err: any): Promise<boolean> {
+  const code = Number(err?.code ?? err?.error?.code)
+  if (!META_RATE_CODES.includes(code)) return false
+  const bucket = Math.floor(Date.now() / 600_000) // 10 dk kovasi, tekrar kayitlari dedup'lar
+  await supabase
+    .from("webhook_events")
+    .insert({ event_key: `ratefl_${userId}_${bucket}`, event_type: "flag_rate", user_id: userId })
+  console.log(`[v0] 🧯 Meta rate-limit sinyali (kod ${code}) — ${RATE_COOLDOWN_MIN} dk sogutma basladi (${userId})`)
+  return true
+}
+
+// Emoji-agirlikli "ifade" mesaji mi? (harf/rakam yok + en az 1 emoji)
+export function isEmojiExpression(text: string): boolean {
+  const t = (text || "").trim()
+  if (!t || t.length > 12) return false
+  try {
+    return /\p{Extended_Pictographic}/u.test(t) && !/[\p{L}\p{N}]/u.test(t)
+  } catch {
+    return false
+  }
 }
 
 // Takipci + min-follower sarti (sahte hesap filtresi). API dusarsa puanlamayi kilitleme.
@@ -214,7 +288,7 @@ export async function awardCommentPoints(ctx: {
   try {
     const settings = await getGamificationSettings(supabase, user.id)
     if (!settings) return null
-    const member = await resolveMember(supabase, user.id, senderId, username || null)
+    const member = await resolveMember(supabase, user.id, senderId, username || null, user.access_token)
     if (!member || member.opted_out) return null
     // ilk puan mi? (karsilama mesaji icin, kova eklenmeden ONCE bakilir)
     const { count: priorCount } = await supabase
@@ -242,6 +316,53 @@ export async function awardCommentPoints(ctx: {
 }
 
 // ============================================================
+// G2b: DM IFADESI -> PUAN (emoji tepki / hizli ifade / emoji mesaj)
+// Kisi basina GUNDE 1 KEZ (event_key gun-anahtarli). Ilk ifadede kisa tesekkur DM'i.
+// ============================================================
+export async function awardReactionPoints(ctx: { supabase: any; user: any; senderId: any }): Promise<number> {
+  const { supabase, user, senderId } = ctx
+  try {
+    const settings = await getGamificationSettings(supabase, user.id)
+    if (!settings || !(settings.pts_reaction > 0)) return 0
+    const member = await resolveMember(supabase, user.id, senderId, null, user.access_token)
+    if (!member || member.opted_out) return 0
+    if (!(await passesFollowerGate(user, senderId, settings))) return 0
+    const day = new Date().toISOString().slice(0, 10)
+    const pts = await insertBucket(supabase, member, settings.pts_reaction, "ifade", `pt_ifade_${member.id}_${day}`, settings)
+    if (pts <= 0) return 0
+    console.log(`[v0] ⭐ +${pts} ifade puani: ${member.username || senderId}`)
+    // Gunun ilk ifadesine kisa tesekkur — limitler + devre kesici gozetilir
+    if (
+      (await underHourlyLimit(supabase, user.id)) &&
+      !(await rateLimitCoolingDown(supabase, user.id))
+    ) {
+      const { error: sendClaim } = await supabase
+        .from("webhook_events")
+        .insert({ event_key: `send_ifade_${member.id}_${day}`, event_type: "send_dm", user_id: user.id })
+      if (!sendClaim) {
+        await sleep(2000 + Math.random() * 4000)
+        try {
+          const res = await fetch(`${GRAPH}/me/messages?access_token=${encodeURIComponent(user.access_token)}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              recipient: { id: senderId },
+              message: { text: `⭐ +${pts} puan! İfaden için teşekkürler 🎶 Bakiyen için "PUAN" yazabilirsin.` },
+            }),
+          })
+          const json = await res.json()
+          if (json.error) await recordRateLimitHit(supabase, user.id, json.error)
+        } catch {}
+      }
+    }
+    return pts
+  } catch (e) {
+    console.error("[v0] awardReactionPoints hatasi:", e)
+    return 0
+  }
+}
+
+// ============================================================
 // G2: STORY TEPKISI -> PUAN (webhook PART A.5'ten cagrilir)
 // Meta 50k+ takipci sarti dogrulanana kadar settings.story_enabled=false
 // ============================================================
@@ -255,7 +376,7 @@ export async function awardStoryPoints(ctx: {
   try {
     const settings = await getGamificationSettings(supabase, user.id)
     if (!settings || settings.story_enabled !== true) return 0
-    const member = await resolveMember(supabase, user.id, senderId)
+    const member = await resolveMember(supabase, user.id, senderId, null, user.access_token)
     if (!member || member.opted_out) return 0
     if (!(await underDailyActionCap(supabase, member.id, settings.daily_action_cap))) return 0
     if (!(await passesFollowerGate(user, senderId, settings))) return 0
@@ -334,7 +455,7 @@ export async function handleGamificationDM(ctx: {
     }
   }
 
-  const member = await resolveMember(supabase, user.id, senderId)
+  const member = await resolveMember(supabase, user.id, senderId, null, user.access_token)
   if (!member) return false
 
   // 2) Opt-out politikasi: DURDUR demis uyeye yalnizca BASLAT ile cevap verilir
@@ -427,11 +548,18 @@ export async function handleGamificationDM(ctx: {
       if (!quiz) {
         message = { text: `Şu an cevaplayabileceğin yeni quiz yok — yenileri yakında! 🧠\n\nPuanın için "PUAN" yaz.` }
       } else {
+        // Sik metinleri 20 karakterlik quick-reply sinirina sigmayabilir:
+        // siklar soru metninde A/B/C olarak listelenir, butonlar sadece harf tasir
+        const letters = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M"]
+        const optionLines = quiz.options
+          .slice(0, 13)
+          .map((opt: string, i: number) => `${letters[i]}) ${opt}`)
+          .join("\n")
         message = {
-          text: `🧠 QUIZ (+${settings.pts_quiz_correct} / -${settings.pts_quiz_wrong} puan):\n\n${quiz.question}`,
-          quick_replies: quiz.options.slice(0, 13).map((opt: string, i: number) => ({
+          text: `🧠 QUIZ (doğru +${settings.pts_quiz_correct} / yanlış -${settings.pts_quiz_wrong} puan):\n\n${quiz.question}\n\n${optionLines}`,
+          quick_replies: quiz.options.slice(0, 13).map((_opt: string, i: number) => ({
             content_type: "text",
-            title: String(opt).slice(0, 20),
+            title: letters[i],
             payload: `QUIZ_${quiz.id}_${i}`,
           })),
         }
@@ -597,8 +725,13 @@ export async function handleGamificationDM(ctx: {
     console.log(`[v0] 🛑 Saatlik DM limiti doldu (${user.username}), oyunlastirma cevabi atlandi`)
     return true
   }
+  // SPAM: devre kesici — yakin zamanda Meta rate hatasi alindiysa gonderme
+  if (await rateLimitCoolingDown(supabase, user.id)) {
+    console.log(`[v0] 🧯 Rate sogutmasi aktif (${user.username}), oyunlastirma cevabi atlandi`)
+    return true
+  }
   await claimEvent(supabase, `send_gami_${evKey}`, "send_dm", user.id)
-  await sleep(1200 + Math.random() * 2300)
+  await sleep(2000 + Math.random() * 4000) // insani jitter (arastirma §4.2; serverless 60 sn butcesi icinde)
 
   try {
     const res = await fetch(`${GRAPH}/me/messages?access_token=${encodeURIComponent(user.access_token)}`, {
@@ -607,8 +740,10 @@ export async function handleGamificationDM(ctx: {
       body: JSON.stringify({ recipient: { id: senderId }, message }),
     })
     const json = await res.json()
-    if (json.error) console.error("[v0] 🔴 Oyunlastirma DM hatasi:", JSON.stringify(json.error))
-    else console.log(`[v0] 🟢 Oyunlastirma cevabi gitti: ${action} → ${senderId}`)
+    if (json.error) {
+      console.error("[v0] 🔴 Oyunlastirma DM hatasi:", JSON.stringify(json.error))
+      await recordRateLimitHit(supabase, user.id, json.error)
+    } else console.log(`[v0] 🟢 Oyunlastirma cevabi gitti: ${action} → ${senderId}`)
   } catch (e) {
     console.error("[v0] 🔴 Oyunlastirma DM network hatasi:", e)
   }
