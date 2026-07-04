@@ -3,7 +3,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
 import crypto from "crypto"
-import { awardCommentPoints, handleGamificationDM, isOptedOut, underHourlyLimit } from "@/lib/gamification"
+import { awardCommentPoints, awardStoryPoints, handleGamificationDM, isOptedOut, underHourlyLimit } from "@/lib/gamification"
 
 export const maxDuration = 60
 
@@ -337,7 +337,12 @@ export async function POST(request: NextRequest) {
 
               if (content.message) {
                 // Plain Text
-                apiBody.message = { text: content.message }
+                let dmText = content.message
+                // G2: ilk puanini kazanan uyeye karsilama notu
+                if (award?.isFirst) {
+                  dmText += `\n\n🎶 ${award.programName} programına hoş geldin! Bu yorumla +${award.pts} puan kazandın. Bakiyen için bana "PUAN", ödüller için "ÖDÜLLER" yazabilirsin.`
+                }
+                apiBody.message = { text: dmText }
               } else if (content.card) {
                 // Rich Card / Generic Template
                 const card = content.card
@@ -389,6 +394,17 @@ export async function POST(request: NextRequest) {
 
           // Skip system events
           if (event.read || event.delivery || event.message?.is_echo || senderId === recipientId) continue
+
+          // G2: story tepkisine puan (varsayilan KAPALI — settings.story_enabled;
+          // Meta'nin 50k+ takipci sarti dogrulaninca acilacak). Otomasyon eslesmesinden bagimsiz.
+          if (event.reaction?.mid && event.reaction.action !== "unreact") {
+            await awardStoryPoints({
+              supabase,
+              user,
+              senderId,
+              eventKey: `pt_story_${event.reaction.mid}_${senderId}`,
+            })
+          }
 
           // Filter story automations only
           const storyAutomations = automations.filter((a: any) => a.trigger_source === 'story')
@@ -449,7 +465,9 @@ export async function POST(request: NextRequest) {
             console.log(`✨ Story automation matched: ${match.name}`)
 
             try {
-              const content = JSON.parse(match.response_content)
+              // Faz2 fix: response_content jsonb geldiginde JSON.parse patliyordu (story otomasyonlari bu yuzden bozuktu)
+              const content =
+                typeof match.response_content === "string" ? JSON.parse(match.response_content) : match.response_content
               const apiBody: any = { recipient: { id: senderId } }
 
               if (content.message) {
