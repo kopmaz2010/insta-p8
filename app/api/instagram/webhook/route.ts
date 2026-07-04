@@ -14,6 +14,7 @@ import {
   recordRateLimitHit,
   underHourlyLimit,
 } from "@/lib/gamification"
+import { handleAiAssistant } from "@/lib/ai-assistant"
 
 export const maxDuration = 60
 
@@ -701,6 +702,24 @@ export async function POST(request: NextRequest) {
           }
 
           if (!match) {
+            // 🤖 AI YONETICI (ChatPlace muadili): hicbir kural eslesmediyse
+            // persona'li AI cevabi dene (panelden acik + ANTHROPIC_API_KEY gerekli)
+            if (triggerType === "keyword" && event.message?.text) {
+              try {
+                const aiHandled = await handleAiAssistant({
+                  supabase,
+                  user,
+                  senderId,
+                  text: event.message.text,
+                  evKey,
+                  claimEvent,
+                  underDailyLimit,
+                })
+                if (aiHandled) continue
+              } catch (e) {
+                console.error("[v0] AI yonetici hatasi:", e)
+              }
+            }
             console.log(`[v0] ❌ No match.`)
             continue
           }

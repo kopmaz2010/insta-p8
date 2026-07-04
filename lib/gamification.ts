@@ -212,10 +212,33 @@ export async function passesFollowerGate(user: any, igsid: any, settings: any): 
   }
 }
 
+// Uyenin bugun kazandigi toplam puan (gunluk puan tavani icin; UTC gunu)
+async function todayEarned(supabase: any, memberId: string): Promise<number> {
+  const dayStart = new Date()
+  dayStart.setUTCHours(0, 0, 0, 0)
+  const { data, error } = await supabase
+    .from("point_buckets")
+    .select("amount")
+    .eq("member_id", memberId)
+    .gte("earned_at", dayStart.toISOString())
+  if (error || !data) return 0
+  return data.reduce((s: number, b: any) => s + Math.max(0, b.amount || 0), 0)
+}
+
 // Puan kovasi ekle. event_key UNIQUE = ayni eylem iki kez puan VEREMEZ (anti-hile).
+// daily_points_cap: gunde kazanilabilecek toplam puani sinirlar (asani kirpar).
 async function insertBucket(supabase: any, member: any, basePts: number, reason: string, eventKey: string, settings: any): Promise<number> {
-  const pts = Math.round(basePts * Number(settings.launch_multiplier || 1))
+  let pts = Math.round(basePts * Number(settings.launch_multiplier || 1))
   if (pts <= 0) return 0
+  const cap = Number(settings.daily_points_cap || 0)
+  if (cap > 0) {
+    const earned = await todayEarned(supabase, member.id)
+    if (earned >= cap) {
+      console.log(`[v0] ⭐ Gunluk puan tavani (${cap}) doldu: ${member.username || member.igsid}`)
+      return 0
+    }
+    pts = Math.min(pts, cap - earned)
+  }
   const expiresAt = settings.point_ttl_days
     ? new Date(Date.now() + settings.point_ttl_days * 86400_000).toISOString()
     : null
@@ -390,6 +413,51 @@ export async function awardStoryPoints(ctx: {
 }
 
 // ============================================================
+// QUIZ YARDIMCILARI (zincirli akis: cevap -> sonuc + siradaki soru)
+// ============================================================
+const QUIZ_LETTERS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M"]
+
+async function getNextQuiz(supabase: any, userId: any, memberId: string) {
+  const { data: quizzes } = await supabase
+    .from("quizzes")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("active", true)
+    .order("created_at", { ascending: true })
+  const { data: answered } = await supabase.from("quiz_answers").select("quiz_id").eq("member_id", memberId)
+  const answeredIds = new Set((answered || []).map((a: any) => a.quiz_id))
+  return (quizzes || []).find((q: any) => !answeredIds.has(q.id)) || null
+}
+
+// Bugun cevaplanan soru sayisi (gunluk soru siniri; UTC gunu)
+async function quizAnswersToday(supabase: any, memberId: string): Promise<number> {
+  const dayStart = new Date()
+  dayStart.setUTCHours(0, 0, 0, 0)
+  const { count, error } = await supabase
+    .from("quiz_answers")
+    .select("id", { count: "exact", head: true })
+    .eq("member_id", memberId)
+    .gte("created_at", dayStart.toISOString())
+  if (error) return 0
+  return count || 0
+}
+
+// Soru blogu: siklar metinde A/B/C listelenir (20 karakterlik quick-reply siniri),
+// butonlar yalnizca harf tasir
+function quizBlock(quiz: any, settings: any) {
+  const opts = quiz.options.slice(0, 13)
+  const optionLines = opts.map((opt: string, i: number) => `${QUIZ_LETTERS[i]}) ${opt}`).join("\n")
+  return {
+    text: `🧠 SORU (doğru +${settings.pts_quiz_correct} / yanlış -${settings.pts_quiz_wrong}):\n\n${quiz.question}\n\n${optionLines}`,
+    quick_replies: opts.map((_opt: string, i: number) => ({
+      content_type: "text",
+      title: QUIZ_LETTERS[i],
+      payload: `QUIZ_${quiz.id}_${i}`,
+    })),
+  }
+}
+
+// ============================================================
 // DM KOMUTLARI (webhook PART B'den cagrilir)
 // G1: PUAN / ÖDÜLLER / DURDUR / BASLAT / NASIL + ODUL_<id> & SHOW_* payload
 // G2: QUIZ / DAVET / KATIL / LIDERLIK / IPTAL + QUIZ_<id>_<idx> payload
@@ -535,35 +603,13 @@ export async function handleGamificationDM(ctx: {
   } else if (action === "quiz") {
     if (settings.quiz_enabled !== true) {
       message = { text: `Quiz şu an kapalı. Puanını görmek için "PUAN" yazabilirsin. ⭐` }
+    } else if ((await quizAnswersToday(supabase, member.id)) >= (settings.daily_quiz_limit || 5)) {
+      message = { text: `Bugünlük soru hakkın doldu 🙂 Yarın yeni sorularla devam!\n\n⭐ Puanın için "PUAN" yazabilirsin.` }
     } else {
-      const { data: quizzes } = await supabase
-        .from("quizzes")
-        .select("*")
-        .eq("user_id", user.id)
-        .eq("active", true)
-        .order("created_at", { ascending: true })
-      const { data: answered } = await supabase.from("quiz_answers").select("quiz_id").eq("member_id", member.id)
-      const answeredIds = new Set((answered || []).map((a: any) => a.quiz_id))
-      const quiz = (quizzes || []).find((q: any) => !answeredIds.has(q.id))
-      if (!quiz) {
-        message = { text: `Şu an cevaplayabileceğin yeni quiz yok — yenileri yakında! 🧠\n\nPuanın için "PUAN" yaz.` }
-      } else {
-        // Sik metinleri 20 karakterlik quick-reply sinirina sigmayabilir:
-        // siklar soru metninde A/B/C olarak listelenir, butonlar sadece harf tasir
-        const letters = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M"]
-        const optionLines = quiz.options
-          .slice(0, 13)
-          .map((opt: string, i: number) => `${letters[i]}) ${opt}`)
-          .join("\n")
-        message = {
-          text: `🧠 QUIZ (doğru +${settings.pts_quiz_correct} / yanlış -${settings.pts_quiz_wrong} puan):\n\n${quiz.question}\n\n${optionLines}`,
-          quick_replies: quiz.options.slice(0, 13).map((_opt: string, i: number) => ({
-            content_type: "text",
-            title: letters[i],
-            payload: `QUIZ_${quiz.id}_${i}`,
-          })),
-        }
-      }
+      const quiz = await getNextQuiz(supabase, user.id, member.id)
+      message = quiz
+        ? quizBlock(quiz, settings)
+        : { text: `Şimdilik cevaplayabileceğin yeni soru kalmadı — yenileri yakında! 🧠\n\nPuanın için "PUAN" yaz.` }
     }
   } else if (action === "quiz_answer") {
     const { data: quiz } = await supabase
@@ -573,31 +619,49 @@ export async function handleGamificationDM(ctx: {
       .eq("user_id", user.id)
       .single()
     if (!quiz || !Number.isInteger(quizChoice) || quizChoice < 0 || quizChoice >= quiz.options.length) {
-      message = { text: `Bu quiz artık geçerli değil. Yeni quiz için "QUIZ" yaz. 🧠` }
+      message = { text: `Bu soru artık geçerli değil. Devam etmek için "QUIZ" yaz. 🧠` }
     } else {
       const correct = quizChoice === quiz.correct_index
       const { error: ansErr } = await supabase
         .from("quiz_answers")
         .insert({ quiz_id: quiz.id, member_id: member.id, selected_index: quizChoice, correct })
       if (ansErr?.code === "23505") {
-        message = { text: `Bu quizi zaten cevapladın! 🙂 Yeni quiz için "QUIZ" yaz.` }
+        message = { text: `Bu soruyu zaten cevapladın! 🙂 Devam etmek için "QUIZ" yaz.` }
       } else if (ansErr) {
         console.error("[v0] quiz cevap kayit hatasi:", ansErr)
         message = { text: `Bir sorun oluştu, biraz sonra tekrar dener misin? 🙏` }
-      } else if (correct) {
-        const pts = await insertBucket(supabase, member, settings.pts_quiz_correct, "quiz", `pt_quiz_${quiz.id}_${member.id}`, settings)
-        await supabase.from("loyalty_members").update({ quiz_score: (member.quiz_score || 0) + 1 }).eq("id", member.id)
-        const bal = await getBalance(supabase, member.id)
-        message = { text: `🎉 DOĞRU! +${pts} puan kazandın!\n\n⭐ Yeni bakiyen: ${bal}\nYeni quiz için "QUIZ" yaz.` }
       } else {
-        const { data: deducted } = await supabase.rpc("deduct_points", {
-          p_member_id: member.id,
-          p_amount: settings.pts_quiz_wrong,
-        })
-        await supabase.from("loyalty_members").update({ quiz_score: (member.quiz_score || 0) - 1 }).eq("id", member.id)
-        const bal = await getBalance(supabase, member.id)
-        message = {
-          text: `❌ Yanlış! Doğru cevap: ${quiz.options[quiz.correct_index]}\n\n-${deducted ?? settings.pts_quiz_wrong} puan. ⭐ Bakiyen: ${bal}\nTelafi için yorum yapmaya devam! 🎶`,
+        let resultText: string
+        if (correct) {
+          const pts = await insertBucket(supabase, member, settings.pts_quiz_correct, "quiz", `pt_quiz_${quiz.id}_${member.id}`, settings)
+          await supabase.from("loyalty_members").update({ quiz_score: (member.quiz_score || 0) + 1 }).eq("id", member.id)
+          const bal = await getBalance(supabase, member.id)
+          resultText =
+            pts > 0
+              ? `🎉 DOĞRU! +${pts} puan kazandın! ⭐ Bakiyen: ${bal}`
+              : `🎉 DOĞRU! (Günlük puan tavanın dolduğu için puan eklenmedi.) ⭐ Bakiyen: ${bal}`
+        } else {
+          const { data: deducted } = await supabase.rpc("deduct_points", {
+            p_member_id: member.id,
+            p_amount: settings.pts_quiz_wrong,
+          })
+          await supabase.from("loyalty_members").update({ quiz_score: (member.quiz_score || 0) - 1 }).eq("id", member.id)
+          const bal = await getBalance(supabase, member.id)
+          resultText = `❌ Yanlış! Doğru cevap: ${quiz.options[quiz.correct_index]}\n-${deducted ?? settings.pts_quiz_wrong} puan. ⭐ Bakiyen: ${bal}`
+        }
+        // ZINCIR: her seferinde "QUIZ" yazdirmadan siradaki soruyu ayni mesajda gonder
+        const limit = settings.daily_quiz_limit || 5
+        const answeredToday = await quizAnswersToday(supabase, member.id) // az onceki cevap dahil
+        if (answeredToday >= limit) {
+          message = { text: `${resultText}\n\nBugünlük soru hakkın doldu 🙂 Yarın yeni sorularla devam! 🎶` }
+        } else {
+          const next = await getNextQuiz(supabase, user.id, member.id)
+          if (!next) {
+            message = { text: `${resultText}\n\nŞimdilik sorular bitti — yenileri yakında! 🎶` }
+          } else {
+            const qb = quizBlock(next, settings)
+            message = { text: `${resultText}\n\n${qb.text}`, quick_replies: qb.quick_replies }
+          }
         }
       }
     }
