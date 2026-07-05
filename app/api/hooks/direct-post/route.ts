@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
-import { createReelsContainer, getContainerStatus, publishContainer } from "@/lib/instagram-publishing"
+import { createReelsContainer, getContainerStatus, publishContainer, recordTrialPost, underTrialQuota } from "@/lib/instagram-publishing"
 
 // Vercel: Allow up to 60s execution
 export const maxDuration = 60
@@ -43,15 +43,26 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: "User not found or no access token" }, { status: 404 })
         }
 
+        // 3.5 KOTA: hesap basina gunde max 15 deneme reelsi — asilirsa acik hata don,
+        // cagiran (n8n vb.) trial:false ile normal paylasima karar verebilsin
+        const effectiveTrial = trial ? (trialStrategy === "MANUAL" ? "MANUAL" : "SS_PERFORMANCE") : null
+        if (effectiveTrial && !(await underTrialQuota(supabase, userId))) {
+            return NextResponse.json({
+                error: "Günlük deneme reelsi kotası doldu (varsayılan 15/gün, DAILY_TRIAL_LIMIT env ile değişir). Normal paylaşım için trial:false gönderin.",
+                quotaExceeded: true,
+            }, { status: 429 })
+        }
+
         // 4. Create Instagram Reels Container
-        console.log(`[DirectPost] Creating container for user ${userId}${trial ? " (deneme reelsi)" : ""}`)
+        console.log(`[DirectPost] Creating container for user ${userId}${effectiveTrial ? " (deneme reelsi)" : ""}`)
         const containerId = await createReelsContainer(
             user.access_token,
             videoUrl,
             caption || "",
             undefined,
-            trial ? (trialStrategy === "MANUAL" ? "MANUAL" : "SS_PERFORMANCE") : null,
+            effectiveTrial,
         )
+        if (effectiveTrial) await recordTrialPost(supabase, userId, containerId)
 
         // 5. Return immediately (Client handles polling)
         // This avoids Vercel 10s/60s function timeouts

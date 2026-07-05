@@ -11,6 +11,33 @@ interface PublishResponse {
 
 export type TrialStrategy = 'MANUAL' | 'SS_PERFORMANCE'
 
+// Hesap basina gunluk deneme reelsi kotasi (UTC gunu). Sayac webhook_events
+// defterinde 'trial_reel' event'i olarak tutulur (event_key = trial_<containerId>).
+const DAILY_TRIAL_LIMIT = Number(process.env.DAILY_TRIAL_LIMIT || 15)
+
+export async function underTrialQuota(supabase: any, userId: any): Promise<boolean> {
+    const dayStart = new Date()
+    dayStart.setUTCHours(0, 0, 0, 0)
+    const { count, error } = await supabase
+        .from("webhook_events")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .eq("event_type", "trial_reel")
+        .gte("processed_at", dayStart.toISOString())
+    if (error) {
+        console.error("[TrialQuota] sayim hatasi:", error)
+        return true // sayac dusarse paylasimi engelleme
+    }
+    return (count || 0) < DAILY_TRIAL_LIMIT
+}
+
+export async function recordTrialPost(supabase: any, userId: any, containerId: string): Promise<void> {
+    const { error } = await supabase
+        .from("webhook_events")
+        .insert({ event_key: `trial_${containerId}`, event_type: "trial_reel", user_id: userId })
+    if (error && error.code !== "23505") console.error("[TrialQuota] kayit hatasi:", error)
+}
+
 /**
  * Creates a media container for a Reel
  * trialStrategy verilirse reel "deneme reelsi" (trial reel) olarak paylaşılır:

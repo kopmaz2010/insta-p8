@@ -175,7 +175,9 @@ export function SchedulerSettings({ userId }: SchedulerSettingsProps) {
                             </SelectContent>
                         </Select>
                         <p className="text-xs text-neutral-500">
-                            Not: Hesabında deneme reelsi özelliği yoksa Instagram paylaşımı reddeder — bu durumda bu anahtarı kapat.
+                            Not: Hesap başına günde en fazla <strong>15 deneme reelsi</strong> paylaşılır; kota dolunca
+                            paylaşımlar normal reels olarak devam eder. Hesabında deneme reelsi özelliği yoksa
+                            Instagram paylaşımı reddeder — bu durumda bu anahtarı kapat.
                         </p>
                     </div>
                 )}

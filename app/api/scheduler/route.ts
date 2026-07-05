@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
-import { createReelsContainer, getContainerStatus, publishContainer } from "@/lib/instagram-publishing"
+import { createReelsContainer, getContainerStatus, publishContainer, recordTrialPost, underTrialQuota } from "@/lib/instagram-publishing"
 
 // Helper to wait
 const delay = (ms: number) => new Promise(res => setTimeout(res, ms))
@@ -131,11 +131,18 @@ export async function GET(request: NextRequest) {
                 console.log(`[Scheduler] Posting Clip #${clip.sequence_index} for User ${config.user_id}`)
 
                 // A. Create Container (post_as_trial acik ise deneme reelsi olarak)
-                const trialStrategy = config.post_as_trial
+                let trialStrategy = config.post_as_trial
                     ? (config.trial_strategy === "MANUAL" ? "MANUAL" : "SS_PERFORMANCE")
                     : null
+                // KOTA: hesap basina gunde max 15 deneme reelsi — asilirsa akisi
+                // bozmamak icin normal reels olarak paylasilir
+                if (trialStrategy && !(await underTrialQuota(supabase, config.user_id))) {
+                    console.log(`[Scheduler] 🛑 Gunluk deneme reelsi kotasi doldu (user ${config.user_id}) → normal reels olarak paylasilacak`)
+                    trialStrategy = null
+                }
                 if (trialStrategy) console.log(`[Scheduler] Deneme reelsi modu: ${trialStrategy}`)
                 const containerId = await createReelsContainer(user.access_token, clip.video_url, clip.caption, undefined, trialStrategy)
+                if (trialStrategy) await recordTrialPost(supabase, config.user_id, containerId)
 
                 // B. Wait for Processing (Simple Polling)
                 let status = 'IN_PROGRESS'
