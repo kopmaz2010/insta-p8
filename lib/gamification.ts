@@ -8,7 +8,9 @@
 // ============================================================
 
 const GRAPH = "https://graph.instagram.com/v24.0"
-const HOURLY_DM_LIMIT = Number(process.env.HOURLY_DM_LIMIT || 40) // Meta ~200/saat sinirinin cok altinda
+// 5 Tem: DAILY_DM_LIMIT 1000'e cikinca saatlik de orantili yukseltildi (200) —
+// resmi Private Reply tavani olan 750/saatin hala belirgin altinda kaliyor.
+const HOURLY_DM_LIMIT = Number(process.env.HOURLY_DM_LIMIT || 200)
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://project-80xl4-kopmaz2010s-projects.vercel.app"
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))

@@ -19,10 +19,16 @@ import { handleAiAssistant } from "@/lib/ai-assistant"
 export const maxDuration = 60
 
 const WEBHOOK_VERIFY_TOKEN = process.env.INSTAGRAM_WEBHOOK_VERIFY_TOKEN || "your_verify_token"
-// SPAM (bkz. Vibe-Coding/INSTAGRAM-LIMIT-ARASTIRMASI.md): davranissal guvenli hacim
-// isinmis hesap icin 100-150/gun — varsayilani muhafazakar 120'ye cektik (Katman 2).
-// Katman 1 resmi tavan (750 private-reply/saat) HOURLY_DM_LIMIT=40 ile zaten cok altta.
-const DAILY_DM_LIMIT = Number(process.env.DAILY_DM_LIMIT || 120)
+// SPAM (bkz. Vibe-Coding/INSTAGRAM-LIMIT-ARASTIRMASI.md): akis SADECE tetiklemeli
+// (yorum -> cevap), soguk-DM degil; bu yuzden Katman 2'nin "100-150/gun soguk-DM"
+// sezgisi degil, Katman 1'in resmi Private Reply tavani (750/saat = ~18.000/gun
+// teorik) esas alinabilir. 5 Tem'de Ismail'in talebiyle 120 -> 1000/gun yukseltildi
+// (viral gonderi patlamalarinda buyuk/koklu hesaplarin bu hacme rahat ulastigi
+// gozlemlendi). RISK NOTU: bu gozlem koklu/yuksek-guvenli hesaplardan; Fabrika
+// Muzik/ikopmaz o olcekte degilse ayni guven payini gormeyebilir. Devre kesici
+// (rateLimitCoolingDown) gercek Meta rate hatasinda 30 dk otomatik durdurur —
+// asil guvenlik agi budur, sabit sayi degil.
+const DAILY_DM_LIMIT = Number(process.env.DAILY_DM_LIMIT || 1000)
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
