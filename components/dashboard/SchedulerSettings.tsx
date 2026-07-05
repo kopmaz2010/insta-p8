@@ -21,6 +21,8 @@ export function SchedulerSettings({ userId }: SchedulerSettingsProps) {
     const [interval, setInterval] = useState("240") // minutes
     const [startTime, setStartTime] = useState("09:00")
     const [endTime, setEndTime] = useState("21:00")
+    const [postAsTrial, setPostAsTrial] = useState(false)
+    const [trialStrategy, setTrialStrategy] = useState<"SS_PERFORMANCE" | "MANUAL">("SS_PERFORMANCE")
 
     // Status info
     const [nextRun, setNextRun] = useState<string | null>(null)
@@ -41,6 +43,8 @@ export function SchedulerSettings({ userId }: SchedulerSettingsProps) {
                     setInterval(data.interval_minutes.toString())
                     setStartTime(data.start_time || "09:00")
                     setEndTime(data.end_time || "21:00")
+                    setPostAsTrial(data.post_as_trial === true)
+                    setTrialStrategy(data.trial_strategy === "MANUAL" ? "MANUAL" : "SS_PERFORMANCE")
                     setNextRun(data.next_run_at)
                     setCurrentIndex(data.current_sequence_index)
                 }
@@ -63,7 +67,9 @@ export function SchedulerSettings({ userId }: SchedulerSettingsProps) {
                     is_running: enabled,
                     interval_minutes: parseInt(interval),
                     start_time: startTime,
-                    end_time: endTime
+                    end_time: endTime,
+                    post_as_trial: postAsTrial,
+                    trial_strategy: trialStrategy
                 })
             })
 
@@ -143,6 +149,36 @@ export function SchedulerSettings({ userId }: SchedulerSettingsProps) {
                         Posts will only run within this window.
                     </p>
                 </div>
+            </div>
+
+            {/* Deneme Reelsi (Trial Reels) */}
+            <div className="rounded-lg border border-white/10 bg-black/20 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <Label className="text-white">🧪 Deneme Reelsi (Trial)</Label>
+                        <p className="text-xs text-neutral-500 mt-1">
+                            Reels önce yalnızca takipçi olmayanlara gösterilir — içeriği kitlene açmadan test et.
+                        </p>
+                    </div>
+                    <Switch checked={postAsTrial} onCheckedChange={setPostAsTrial} />
+                </div>
+                {postAsTrial && (
+                    <div className="space-y-2">
+                        <Label className="text-xs text-neutral-400">Herkese açılma şekli</Label>
+                        <Select value={trialStrategy} onValueChange={(v: any) => setTrialStrategy(v)}>
+                            <SelectTrigger className="bg-black/20">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="SS_PERFORMANCE">İyi performans gösterirse otomatik açılsın</SelectItem>
+                                <SelectItem value="MANUAL">Ben Instagram uygulamasından elle açarım</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <p className="text-xs text-neutral-500">
+                            Not: Hesabında deneme reelsi özelliği yoksa Instagram paylaşımı reddeder — bu durumda bu anahtarı kapat.
+                        </p>
+                    </div>
+                )}
             </div>
 
             {nextRun && (

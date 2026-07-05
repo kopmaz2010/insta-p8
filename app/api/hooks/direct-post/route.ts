@@ -24,8 +24,8 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
         }
 
-        // 2. Parse Body
-        const { videoUrl, caption, userId } = await request.json()
+        // 2. Parse Body (trial: true -> deneme reelsi; trialStrategy: MANUAL | SS_PERFORMANCE)
+        const { videoUrl, caption, userId, trial, trialStrategy } = await request.json()
         if (!videoUrl || !userId) {
             return NextResponse.json({ error: "Missing videoUrl or userId" }, { status: 400 })
         }
@@ -44,8 +44,14 @@ export async function POST(request: NextRequest) {
         }
 
         // 4. Create Instagram Reels Container
-        console.log(`[DirectPost] Creating container for user ${userId}`)
-        const containerId = await createReelsContainer(user.access_token, videoUrl, caption || "")
+        console.log(`[DirectPost] Creating container for user ${userId}${trial ? " (deneme reelsi)" : ""}`)
+        const containerId = await createReelsContainer(
+            user.access_token,
+            videoUrl,
+            caption || "",
+            undefined,
+            trial ? (trialStrategy === "MANUAL" ? "MANUAL" : "SS_PERFORMANCE") : null,
+        )
 
         // 5. Return immediately (Client handles polling)
         // This avoids Vercel 10s/60s function timeouts

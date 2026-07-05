@@ -9,10 +9,16 @@ interface PublishResponse {
     error?: any
 }
 
+export type TrialStrategy = 'MANUAL' | 'SS_PERFORMANCE'
+
 /**
  * Creates a media container for a Reel
+ * trialStrategy verilirse reel "deneme reelsi" (trial reel) olarak paylaşılır:
+ * önce yalnızca takipçi-olmayanlara gösterilir. SS_PERFORMANCE = iyi performansta
+ * otomatik herkese açılır, MANUAL = Instagram uygulamasından elle açılır.
+ * (Hesapta trial reels özelliği yoksa Meta container aşamasında hata döner.)
  */
-export async function createReelsContainer(accessToken: string, videoUrl: string, caption: string, coverUrl?: string): Promise<string> {
+export async function createReelsContainer(accessToken: string, videoUrl: string, caption: string, coverUrl?: string, trialStrategy?: TrialStrategy | null): Promise<string> {
     const endpoint = `https://graph.instagram.com/me/media`
 
     const params = new URLSearchParams({
@@ -25,6 +31,11 @@ export async function createReelsContainer(accessToken: string, videoUrl: string
     // Optional: Cover URL
     if (coverUrl) {
         params.append('cover_url', coverUrl)
+    }
+
+    // Optional: Trial reel (deneme reelsi)
+    if (trialStrategy) {
+        params.append('trial_params', JSON.stringify({ graduation_strategy: trialStrategy }))
     }
 
     const res = await fetch(`${endpoint}?${params.toString()}`, { method: 'POST' })

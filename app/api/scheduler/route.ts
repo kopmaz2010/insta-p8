@@ -130,8 +130,12 @@ export async function GET(request: NextRequest) {
                 // 5. Publish to Instagram
                 console.log(`[Scheduler] Posting Clip #${clip.sequence_index} for User ${config.user_id}`)
 
-                // A. Create Container
-                const containerId = await createReelsContainer(user.access_token, clip.video_url, clip.caption)
+                // A. Create Container (post_as_trial acik ise deneme reelsi olarak)
+                const trialStrategy = config.post_as_trial
+                    ? (config.trial_strategy === "MANUAL" ? "MANUAL" : "SS_PERFORMANCE")
+                    : null
+                if (trialStrategy) console.log(`[Scheduler] Deneme reelsi modu: ${trialStrategy}`)
+                const containerId = await createReelsContainer(user.access_token, clip.video_url, clip.caption, undefined, trialStrategy)
 
                 // B. Wait for Processing (Simple Polling)
                 let status = 'IN_PROGRESS'
