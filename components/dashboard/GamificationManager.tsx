@@ -14,7 +14,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { toast } from "sonner"
-import { Trophy, Plus, Trash2, Save, Loader2, Bot, Gift, Brain, Settings2, ExternalLink } from "lucide-react"
+import { Trophy, Plus, Trash2, Save, Loader2, Gift, Brain, Settings2, ExternalLink } from "lucide-react"
 
 const NUMBER_FIELDS = [
   { key: "pts_comment", label: "Yorum puanı" },
@@ -37,8 +37,6 @@ export function GamificationManager() {
   const [userId, setUserId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [settings, setSettings] = useState<any>(null)
-  const [ai, setAi] = useState<any>({ enabled: false, persona: "" })
-  const [aiKeyPresent, setAiKeyPresent] = useState(false)
   const [quizzes, setQuizzes] = useState<any[]>([])
   const [rewards, setRewards] = useState<any[]>([])
   const [saving, setSaving] = useState(false)
@@ -59,8 +57,6 @@ export function GamificationManager() {
     ])
       .then(([s, q, r]) => {
         setSettings(s.settings || { active: false })
-        setAi(s.ai || { enabled: false, persona: "" })
-        setAiKeyPresent(Boolean(s.aiKeyPresent))
         setQuizzes(Array.isArray(q) ? q : [])
         setRewards(Array.isArray(r) ? r : [])
       })
@@ -74,7 +70,7 @@ export function GamificationManager() {
       const res = await fetch("/api/gamification/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, settings, ai, ...(extra || {}) }),
+        body: JSON.stringify({ userId, settings, ...(extra || {}) }),
       })
       if (!res.ok) throw new Error()
       toast.success("Kaydedildi ✅")
@@ -119,7 +115,6 @@ export function GamificationManager() {
           <TabsTrigger value="settings"><Settings2 className="w-4 h-4 mr-1" /> Ayarlar</TabsTrigger>
           <TabsTrigger value="quizzes"><Brain className="w-4 h-4 mr-1" /> Quiz Soruları</TabsTrigger>
           <TabsTrigger value="rewards"><Gift className="w-4 h-4 mr-1" /> Ödüller</TabsTrigger>
-          <TabsTrigger value="ai"><Bot className="w-4 h-4 mr-1" /> AI Yönetici</TabsTrigger>
         </TabsList>
 
         {/* ============ AYARLAR ============ */}
@@ -237,41 +232,8 @@ export function GamificationManager() {
           ))}
         </TabsContent>
 
-        {/* ============ AI YONETICI ============ */}
-        <TabsContent value="ai" className="space-y-4 mt-4">
-          <div className={cardCls}>
-            <div className="flex items-center justify-between mb-2">
-              <div>
-                <div className="font-semibold text-white">AI Yönetici</div>
-                <div className="text-xs text-neutral-400">
-                  Hiçbir otomasyon/komut eşleşmeyen DM'lere aşağıdaki iletişim kurallarıyla 7/24 cevap verir
-                </div>
-              </div>
-              <Switch
-                checked={ai?.enabled === true}
-                disabled={!aiKeyPresent}
-                onCheckedChange={(v) => setAi({ ...ai, enabled: v })}
-              />
-            </div>
-            {!aiKeyPresent && (
-              <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 text-yellow-200 text-sm px-4 py-3 mb-4">
-                ⚠️ Vercel ortam değişkenlerine <code className="font-mono">ANTHROPIC_API_KEY</code> eklenmeden AI
-                yönetici çalışmaz. Ekledikten sonra yeniden deploy gerekir.
-              </div>
-            )}
-            <label className={labelCls}>İletişim kuralları (persona)</label>
-            <Textarea
-              className={`${inputCls} min-h-[320px] font-mono text-xs mt-1`}
-              value={ai?.persona || ""}
-              onChange={(e) => setAi({ ...ai, persona: e.target.value })}
-              placeholder="SENARYO: ... İLETİŞİM PROFİLİ: ... STİL KILAVUZU: ..."
-            />
-            <Button onClick={() => saveSettings()} disabled={saving} className="mt-4">
-              {saving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Save className="w-4 h-4 mr-1" />} Kaydet
-            </Button>
-          </div>
-        </TabsContent>
       </Tabs>
+      {/* AI Yönetici artık kendi sayfasında: /dashboard/chatbot */}
     </div>
   )
 }
