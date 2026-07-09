@@ -2,6 +2,11 @@
 
 import { useState, useEffect } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
+import { toast } from "sonner"
+
+// Ayni OAuth code'unu iki kez POST etmeyi engeller (yenileme / cift render):
+// code tek kullanimlik oldugu icin ikinci istek "already used" hatasi uretiyordu
+const processedCodes = new Set<string>()
 
 export function useInstagramSession() {
     const [username, setUsername] = useState<string | null>(null)
@@ -16,7 +21,8 @@ export function useInstagramSession() {
 
         const handleSession = async () => {
             // CASE A: New Login from Instagram
-            if (code) {
+            if (code && !processedCodes.has(code)) {
+                processedCodes.add(code)
                 try {
                     const res = await fetch("/api/instagram/callback", {
                         method: "POST",
@@ -32,9 +38,22 @@ export function useInstagramSession() {
                         setUsername(data.username)
                         // Remove code from URL
                         router.replace("/dashboard")
+                    } else {
+                        // FIX (9 Tem): baglanti hatasi SESSIZCE yutuluyordu — kullanici
+                        // nedenini hic goremiyordu. Artik ekranda gosterilir.
+                        console.error("Login failed:", data.error)
+                        toast.error("Instagram bağlantısı tamamlanamadı", {
+                            description: data.error || "Lütfen 'Instagram'ı Bağla' ile tekrar dene.",
+                            duration: 12000,
+                        })
+                        router.replace("/dashboard")
                     }
                 } catch (err) {
                     console.error("Login failed:", err)
+                    toast.error("Ağ hatası — Instagram bağlantısı tamamlanamadı", {
+                        description: "İnternetini kontrol edip tekrar dene.",
+                        duration: 12000,
+                    })
                 }
             }
             // CASE B: Restore Session from LocalStorage

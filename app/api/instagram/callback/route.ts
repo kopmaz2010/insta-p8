@@ -69,12 +69,23 @@ export async function POST(request: NextRequest) {
     // kaydediliyordu — 1 saat sonra hesap "koptu" (fabrika_muzik kazasi).
     // Artik basarisiz exchange'de DB'ye HIC yazmadan acik hata donuyoruz.
     const longLivedUrl = `https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${clientSecret}&access_token=${shortToken}`
-    const longRes = await fetch(longLivedUrl)
-    const longData = await longRes.json()
-    if (!longData.access_token) {
-      console.error("[v0] 🔴 Long-lived token exchange basarisiz:", JSON.stringify(longData))
+    let longData: any = null
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const longRes = await fetch(longLivedUrl)
+      longData = await longRes.json()
+      if (longData?.access_token) break
+      console.error(`[v0] 🔴 Long-lived exchange denemesi ${attempt}/3 basarisiz:`, JSON.stringify(longData))
+      await new Promise((r) => setTimeout(r, 1500))
+    }
+    if (!longData?.access_token) {
+      const igMsg = longData?.error?.message || longData?.error_message || ""
       return NextResponse.json(
-        { error: "Instagram kalıcı oturum anahtarı veremedi (geçici). Lütfen 'Instagram'ı Bağla' ile tekrar dene." },
+        {
+          error:
+            `Instagram kalıcı oturum anahtarı veremedi (3 deneme).` +
+            (igMsg ? ` Instagram'ın mesajı: "${igMsg}".` : "") +
+            ` Birkaç dakika sonra 'Instagram'ı Bağla' ile tekrar dene.`,
+        },
         { status: 502 },
       )
     }
