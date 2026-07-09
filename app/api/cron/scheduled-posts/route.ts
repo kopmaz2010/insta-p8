@@ -58,7 +58,17 @@ export async function GET() {
       // Container (yoksa olustur; varsa kaldigi yerden devam)
       let containerId = post.ig_container_id
       if (!containerId) {
-        await supabase.from("scheduled_posts").update({ status: "processing" }).eq("id", post.id)
+        // ATOMIK CLAIM: es zamanli iki tetik ayni kaydi almasin (cift container/yayin onlenir)
+        const { data: claimed } = await supabase
+          .from("scheduled_posts")
+          .update({ status: "processing" })
+          .eq("id", post.id)
+          .eq("status", "pending")
+          .select("id")
+        if (!claimed?.length) {
+          results.push({ ...log, status: "baska-kosu-isliyor" })
+          continue
+        }
         containerId = await createReelsContainer(
           user.access_token,
           post.video_url,
