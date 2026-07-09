@@ -539,6 +539,32 @@ export async function POST(request: NextRequest) {
           if (match) {
             console.log(`✨ Story automation matched: ${match.name}`)
 
+            // MADDE 3 (10-ACIK): story cevaplari da dedup + limit + devre kesici
+            // zincirinden gecer (Meta retry'inda cift DM ve story flood'u engeller).
+            // Anahtar mid/reaction-mid bazli: ayni event tekrar gelirse islenmez.
+            const storyKey = `story_${match.id}_${senderId}_${event.message?.mid || event.reaction?.mid || event.timestamp}`
+            if (!(await claimEvent(supabase, storyKey, "send_dm", user.id))) {
+              console.log(`[v0] ⏭️ Story cevabi zaten gonderildi (retry), atlandi`)
+              continue
+            }
+            if (!(await underDailyLimit(supabase, user.id))) {
+              console.log(`[v0] 🛑 Gunluk DM limiti doldu (${user.username}), story cevabi atlandi`)
+              continue
+            }
+            if (!(await underHourlyLimit(supabase, user.id))) {
+              console.log(`[v0] 🛑 Saatlik DM limiti doldu (${user.username}), story cevabi atlandi`)
+              continue
+            }
+            if (await isOptedOut(supabase, user.id, senderId)) {
+              console.log(`[v0] ⏭️ Opt-out kullanici (${senderId}), story cevabi atlandi`)
+              continue
+            }
+            if (await rateLimitCoolingDown(supabase, user.id)) {
+              console.log(`[v0] 🧯 Rate sogutmasi aktif, story cevabi atlandi`)
+              continue
+            }
+            await sleep(2000 + Math.random() * 4000)
+
             try {
               // Faz2 fix: response_content jsonb geldiginde JSON.parse patliyordu (story otomasyonlari bu yuzden bozuktu)
               const content =
@@ -570,12 +596,15 @@ export async function POST(request: NextRequest) {
                 }
               }
 
-              await fetch(
+              const storyRes = await fetch(
                 `https://graph.instagram.com/v24.0/me/messages?access_token=${encodeURIComponent(user.access_token)}`,
                 { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(apiBody) },
               )
-
-              console.log(`✅ Story automation sent: ${match.name}`)
+              const storyJson = await storyRes.json()
+              if (storyJson.error) {
+                console.error(`[v0] 🔴 Story cevabi gonderilemedi:`, JSON.stringify(storyJson.error))
+                await recordRateLimitHit(supabase, user.id, storyJson.error)
+              } else console.log(`✅ Story automation sent: ${match.name}`)
             } catch (err) {
               console.error('❌ Story automation error:', err)
             }

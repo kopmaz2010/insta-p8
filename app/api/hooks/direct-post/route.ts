@@ -24,8 +24,9 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
         }
 
-        // 2. Parse Body (trial: true -> deneme reelsi; trialStrategy: MANUAL | SS_PERFORMANCE)
-        const { videoUrl, caption, userId, trial, trialStrategy } = await request.json()
+        // 2. Parse Body (trial: true -> deneme reelsi; trialStrategy: MANUAL | SS_PERFORMANCE;
+        //    force: true -> tekrar-paylasim korumasini bilerek atla)
+        const { videoUrl, caption, userId, trial, trialStrategy, force } = await request.json()
         if (!videoUrl || !userId) {
             return NextResponse.json({ error: "Missing videoUrl or userId" }, { status: 400 })
         }
@@ -41,6 +42,25 @@ export async function POST(request: NextRequest) {
 
         if (userError || !user?.access_token) {
             return NextResponse.json({ error: "User not found or no access token" }, { status: 404 })
+        }
+
+        // 3.4 MADDE 5 (10-ACIK): TEKRAR-PAYLASIM KORUMASI — ayni video bu hesapta
+        // zaten yayinlandiysa engelle (bilerek tekrar icin force:true gonderilir)
+        if (!force) {
+            const { data: dupe } = await supabase
+                .from("reels_posts")
+                .select("id, published_at")
+                .eq("user_id", userId)
+                .eq("video_url", videoUrl)
+                .in("status", ["PUBLISHED", "success"])
+                .limit(1)
+            if (dupe?.length) {
+                return NextResponse.json({
+                    error: "Bu video bu hesapta zaten paylaşılmış (tekrar-paylaşım koruması). Bilerek tekrar paylaşmak için force:true gönderin.",
+                    duplicate: true,
+                    previousPublishedAt: dupe[0].published_at,
+                }, { status: 409 })
+            }
         }
 
         // 3.5 KOTA: hesap basina gunde max 15 deneme reelsi — asilirsa acik hata don,

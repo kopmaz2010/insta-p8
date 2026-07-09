@@ -69,6 +69,42 @@ export async function GET(request: Request) {
     }
   }
 
-  console.log(`[cron] token refresh bitti: ${refreshed} yenilendi, ${skipped} atlandi, ${failed} hata`)
-  return NextResponse.json({ ok: true, refreshed, skipped, failed })
+  // MADDE 6 (10-ACIK): 30 gunden eski webhook_events kayitlarini temizle —
+  // tablo sismesi her mesajda calisan limit sorgularini yavaslatiyordu.
+  // (dedup anahtarlari gunluk/saatlik; 30 gun fazlasiyla guvenli)
+  let purged = 0
+  try {
+    const cutoff = new Date(Date.now() - 30 * 86400000).toISOString()
+    const { count, error: purgeErr } = await supabase
+      .from("webhook_events")
+      .delete({ count: "exact" })
+      .lt("processed_at", cutoff)
+    if (purgeErr) console.error("[cron] event temizligi hatasi:", purgeErr)
+    else purged = count || 0
+  } catch (e) {
+    console.error("[cron] event temizligi exception:", e)
+  }
+
+  // MADDE 4 (10-ACIK): sonuc bildirimi — TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID
+  // env'leri ekliyse hata/yenileme durumunda Telegram'a mesaj atar (sessiz olum yok)
+  const summary = `🔑 InstaAuto token cron: ${refreshed} yenilendi, ${skipped} atlandı, ${failed} HATA${purged ? ` · 🧹 ${purged} eski event temizlendi` : ""}`
+  if (failed > 0 || refreshed > 0) await notifyTelegram(failed > 0 ? `⚠️ ${summary}` : summary)
+
+  console.log(`[cron] token refresh bitti: ${refreshed} yenilendi, ${skipped} atlandi, ${failed} hata, ${purged} event temizlendi`)
+  return NextResponse.json({ ok: true, refreshed, skipped, failed, purged })
+}
+
+async function notifyTelegram(text: string) {
+  const token = process.env.TELEGRAM_BOT_TOKEN
+  const chatId = process.env.TELEGRAM_CHAT_ID
+  if (!token || !chatId) return // kurulmamis — sessizce gec
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    })
+  } catch (e) {
+    console.error("[cron] telegram bildirimi gonderilemedi:", e)
+  }
 }
