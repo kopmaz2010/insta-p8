@@ -26,7 +26,7 @@ export default function GirisPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password }),
       })
-      if (res.ok) router.push("/dashboard")
+      if (res.ok) window.location.href = "/dashboard" // hard nav: cookie kesin islensin
       else setError("Şifre hatalı")
     } catch {
       setError("Bağlantı hatası")

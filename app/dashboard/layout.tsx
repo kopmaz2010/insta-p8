@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { Sidebar } from "@/components/layout/sidebar"
 import { MobileNav } from "@/components/layout/mobile-nav"
 import { useInstagramSession } from "@/hooks/use-instagram-session"
@@ -11,6 +12,27 @@ export default function DashboardLayout({
     children: React.ReactNode
 }) {
     const { username, logout, isLoading } = useInstagramSession()
+    const [authChecked, setAuthChecked] = useState(false)
+
+    // ADMIN_PASSWORD korumasi aktifse ve oturum yoksa /giris'e yonlendir —
+    // yoksa API'ler sessizce 401 doner ve paneller bos gorunur ("bozuldu" hissi)
+    useEffect(() => {
+        fetch("/api/auth/login")
+            .then((r) => r.json())
+            .then((d) => {
+                if (d.protected && !d.authenticated) window.location.href = "/giris"
+                else setAuthChecked(true)
+            })
+            .catch(() => setAuthChecked(true)) // kontrol edilemezse paneli engelleme
+    }, [])
+
+    if (!authChecked) {
+        return (
+            <div className="flex h-screen items-center justify-center bg-black text-white">
+                <Loader2 className="h-8 w-8 animate-spin text-white" />
+            </div>
+        )
+    }
 
     if (isLoading) {
         return (
