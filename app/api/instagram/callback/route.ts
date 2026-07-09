@@ -65,10 +65,20 @@ export async function POST(request: NextRequest) {
     const loginUserId = tokenData.user_id.toString()
 
     // 3. Exchange for Long Token (60 Days)
+    // FIX (9 Tem): exchange basarisizsa ESKIDEN sessizce 1 saatlik kisa token
+    // kaydediliyordu — 1 saat sonra hesap "koptu" (fabrika_muzik kazasi).
+    // Artik basarisiz exchange'de DB'ye HIC yazmadan acik hata donuyoruz.
     const longLivedUrl = `https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${clientSecret}&access_token=${shortToken}`
     const longRes = await fetch(longLivedUrl)
     const longData = await longRes.json()
-    const accessToken = longData.access_token || shortToken
+    if (!longData.access_token) {
+      console.error("[v0] 🔴 Long-lived token exchange basarisiz:", JSON.stringify(longData))
+      return NextResponse.json(
+        { error: "Instagram kalıcı oturum anahtarı veremedi (geçici). Lütfen 'Instagram'ı Bağla' ile tekrar dene." },
+        { status: 502 },
+      )
+    }
+    const accessToken = longData.access_token
     const expiresIn = longData.expires_in || 5184000
 
     // FAZ1-A1: hesabi comments+messages webhook'una OTOMATIK abone et
@@ -86,8 +96,9 @@ export async function POST(request: NextRequest) {
     // 4. Get Username + IG Professional Account ID (webhook-matching ID)
     // Per Meta docs: /me?fields=user_id returns the IG_ID that matches webhook entry.id
     // https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/get-started
-    let username = `user_${loginUserId}`
-    let businessAccountId = loginUserId // fallback
+    let username = ""
+    let businessAccountId = ""
+    let identityOk = false
 
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
@@ -100,6 +111,7 @@ export async function POST(request: NextRequest) {
         if (meData.username) username = meData.username
         if (meData.user_id) {
           businessAccountId = meData.user_id.toString()
+          identityOk = true
           console.log(`[v0] 🎯 IG Professional Account ID: ${businessAccountId}`)
           break
         }
@@ -111,6 +123,26 @@ export async function POST(request: NextRequest) {
 
     // 6. Save/Update User
     const supabase = await getSupabaseServerClient()
+
+    // FIX (9 Tem): /me kimligi alinamadiysa MEVCUT kaydin kimlik alanlarini
+    // (username/business_account_id/page_id) fallback degerlerle EZME —
+    // sadece token'i tazele. "user_XXXX + bos medya + webhook eslesmiyor"
+    // kazasinin ikinci yarisi buydu.
+    const { data: existing } = await supabase
+      .from("users")
+      .select("username, business_account_id")
+      .eq("id", loginUserId)
+      .single()
+
+    if (!identityOk && existing?.business_account_id) {
+      username = existing.username
+      businessAccountId = String(existing.business_account_id)
+      console.log(`[v0] 🛡️ /me basarisiz — mevcut kimlik korundu: ${username} / ${businessAccountId}`)
+    } else if (!identityOk) {
+      // yeni hesap + kimlik alinamadi: eski fallback davranisi (sonradan SQL ile duzeltilir)
+      username = `user_${loginUserId}`
+      businessAccountId = loginUserId
+    }
 
     const updates: any = {
       username,
