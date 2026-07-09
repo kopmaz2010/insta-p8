@@ -43,6 +43,51 @@ function validSignature(rawBody: string, header: string | null): boolean {
   return a.length === b.length && crypto.timingSafeEqual(a, b)
 }
 
+// ============================================================
+// TURKCE-DUYARLI ANAHTAR KELIME ESLESMESI
+// Eski kod `\b` (word boundary) kullaniyordu — JS'te \b yalnizca ASCII
+// kelime karakterlerini tanir; "takası" gibi Turkce harfle biten kelimeler
+// HIC eslesmiyordu (iki kelimeli "Yetenek Takası" bug'inin koku buydu).
+// Unicode lookaround (?<!\p{L}\p{N}) ... (?!\p{L}\p{N}) ile duzeltildi.
+// ============================================================
+function normalizeTr(s: string): string {
+  return (s || "").toLocaleLowerCase("tr").normalize("NFC")
+}
+function keywordMatches(text: string, triggerValue: string): boolean {
+  const t = normalizeTr(text)
+  return (triggerValue || "").split(",").some((k: string) => {
+    const kw = normalizeTr(k.trim())
+    if (!kw) return false
+    const esc = kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    try {
+      return new RegExp(`(?<![\\p{L}\\p{N}])${esc}(?![\\p{L}\\p{N}])`, "u").test(t)
+    } catch {
+      return t.includes(kw)
+    }
+  })
+}
+
+// Hesap basina mesaj ozellestirmesi: public cevap varyasyonlari (maks 5)
+// + takip kapisi karti metin/butonlari (dashboard > Özelleştirme'den yonetilir)
+const DEFAULT_PUBLIC_REPLIES = ["DM'ne bak! 📩", "Gönderdim, DM'ni kontrol et! 🔥", "DM kutuna düştü! ✨"]
+async function getDmCustomization(supabase: any, user: any) {
+  let data: any = null
+  try {
+    const res = await supabase.from("dm_customization").select("*").eq("user_id", user.id).single()
+    data = res.data
+  } catch {}
+  const replies = (data?.public_replies || []).filter((r: string) => r && r.trim()).slice(0, 5)
+  return {
+    publicReplies: replies.length ? replies : DEFAULT_PUBLIC_REPLIES,
+    gateTitle: (data?.gate_title || "Takipcilere ozel icerik 🔒").slice(0, 80),
+    gateSubtitle: (data?.gate_subtitle || "Once @{username} hesabini takip et, sonra butona bas!")
+      .replaceAll("{username}", user.username)
+      .slice(0, 80),
+    gateBtnProfile: (data?.gate_btn_profile || "Profile Git").slice(0, 20),
+    gateBtnFollow: (data?.gate_btn_follow || "TAKIP ETTIM 🙌").slice(0, 20),
+  }
+}
+
 // FAZ1-A5: event'i sahiplen — ayni anahtar ikinci kez gelirse false (dedup)
 async function claimEvent(supabase: any, key: string, type: string, userId: any): Promise<boolean> {
   const { error } = await supabase.from("webhook_events").insert({ event_key: key, event_type: type, user_id: userId })
@@ -232,9 +277,7 @@ export async function POST(request: NextRequest) {
                 (a) =>
                   a.specific_media_id === mediaId &&
                   a.trigger_type === "keyword" &&
-                  a.trigger_value
-                    .split(",")
-                    .some((k: string) => new RegExp(`\\b${k.trim()}\\b`, "i").test(commentText)),
+                  keywordMatches(commentText, a.trigger_value),
               )
             }
 
@@ -244,9 +287,7 @@ export async function POST(request: NextRequest) {
                 (a) =>
                   !a.specific_media_id && // Must be global
                   a.trigger_type === "keyword" &&
-                  a.trigger_value
-                    .split(",")
-                    .some((k: string) => new RegExp(`\\b${k.trim()}\\b`, "i").test(commentText)),
+                  keywordMatches(commentText, a.trigger_value),
               )
             }
 
@@ -279,6 +320,9 @@ export async function POST(request: NextRequest) {
                 console.log(`[v0] 🧯 Rate sogutmasi aktif (${user.username}), yorum cevabi atlandi`)
                 continue
               }
+              // Ozellestirilmis mesajlar (public cevaplar + takip kapisi karti)
+              const cust = await getDmCustomization(supabase, user)
+
               // === GERCEK FOLLOW GATE (yorum tetiklemeli kurallar) ===
               if (content.check_follow === true) {
                 let follows = false
@@ -301,11 +345,11 @@ export async function POST(request: NextRequest) {
                     { method: "POST", headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ recipient: { comment_id: commentId },
                         message: { attachment: { type: "template", payload: { template_type: "generic", elements: [{
-                          title: "Takipcilere ozel icerik 🔒",
-                          subtitle: `Once @${user.username} hesabini takip et, sonra butona bas!`,
+                          title: cust.gateTitle,
+                          subtitle: cust.gateSubtitle,
                           buttons: [
-                            { type: "web_url", url: `https://instagram.com/${user.username}`, title: "Profile Git" },
-                            { type: "postback", title: "TAKIP ETTIM 🙌", payload: `UNLOCK_CONTENT_${match.id}` }
+                            { type: "web_url", url: `https://instagram.com/${user.username}`, title: cust.gateBtnProfile },
+                            { type: "postback", title: cust.gateBtnFollow, payload: `UNLOCK_CONTENT_${match.id}` }
                           ]
                         }] } } } }) }
                   )
@@ -334,8 +378,8 @@ export async function POST(request: NextRequest) {
               // --- FAZ1: insani gecikme ---
               await sleep(1500 + Math.random() * 2500)
 
-              const replies = ["DM'ne bak! 📩", "Gönderdim, DM'ni kontrol et! 🔥", "DM kutuna düştü! ✨"]
-              let randomReply = replies[Math.floor(Math.random() * replies.length)]
+              // Ozellestirilebilir public cevap varyasyonlari (dashboard > Özelleştirme, maks 5)
+              let randomReply = cust.publicReplies[Math.floor(Math.random() * cust.publicReplies.length)]
               if (award) randomReply += ` ⭐ +${award.pts} puan kazandın, DM'den "PUAN" yaz!`
 
               // Public Reply
@@ -485,9 +529,7 @@ export async function POST(request: NextRequest) {
 
               const triggers = a.trigger_value?.split(',').map((t: string) => t.trim()) || []
               if (triggers.length > 0 && triggers[0] !== 'ALL' && triggers[0] !== 'ALL_MENTIONS' && triggers[0] !== '') {
-                return triggers.some((keyword: string) =>
-                  new RegExp(`\\b${keyword}\\b`, 'i').test(messageText)
-                )
+                return keywordMatches(messageText, triggers.join(","))
               }
               return true
             })
@@ -701,9 +743,7 @@ export async function POST(request: NextRequest) {
             }
           } else {
             match = automations.find(
-              (a) =>
-                a.trigger_type === "keyword" &&
-                a.trigger_value.split(",").some((k: string) => new RegExp(`\\b${k.trim()}\\b`, "i").test(triggerValue)),
+              (a) => a.trigger_type === "keyword" && keywordMatches(triggerValue, a.trigger_value),
             )
           }
 
@@ -767,6 +807,7 @@ export async function POST(request: NextRequest) {
               follows = fj.is_user_follow_business === true
             } catch (e) { console.error("[v0] follow check failed", e) }
             if (!follows) {
+              const cust = await getDmCustomization(supabase, user)
               replyTextLog = "[Takip Kapisi]"
               apiBody.message = {
                 attachment: {
@@ -775,11 +816,11 @@ export async function POST(request: NextRequest) {
                     template_type: "generic",
                     elements: [
                       {
-                        title: "Takipcilere ozel icerik 🔒",
-                        subtitle: `Once @${user.username} hesabini takip et, sonra butona bas!`,
+                        title: cust.gateTitle,
+                        subtitle: cust.gateSubtitle,
                         buttons: [
-                          { type: "web_url", url: `https://instagram.com/${user.username}`, title: "Profile Git" },
-                          { type: "postback", title: "TAKIP ETTIM 🙌", payload: `UNLOCK_CONTENT_${match.id}` },
+                          { type: "web_url", url: `https://instagram.com/${user.username}`, title: cust.gateBtnProfile },
+                          { type: "postback", title: cust.gateBtnFollow, payload: `UNLOCK_CONTENT_${match.id}` },
                         ],
                       },
                     ],

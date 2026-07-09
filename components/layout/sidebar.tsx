@@ -3,7 +3,7 @@
 import type React from "react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Instagram, LayoutDashboard, Zap, LogOut, Settings, BarChart3, MessageSquare, Snowflake, Clapperboard, Trophy, Bot } from "lucide-react"
+import { Instagram, LayoutDashboard, Zap, LogOut, Settings, BarChart3, MessageSquare, Snowflake, Clapperboard, Trophy, Bot, SlidersHorizontal } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 
@@ -75,6 +75,13 @@ export function Sidebar({ className, username = "Demo User", onLogout, onNavigat
           icon={<Bot className="w-4 h-4" />}
           label="Chatbot"
           active={isActive("/dashboard/chatbot")}
+          onClick={onNavigate}
+        />
+        <NavItem
+          href="/dashboard/customization"
+          icon={<SlidersHorizontal className="w-4 h-4" />}
+          label="Özelleştirme"
+          active={isActive("/dashboard/customization")}
           onClick={onNavigate}
         />
         <NavItem
