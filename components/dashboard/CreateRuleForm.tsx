@@ -16,29 +16,49 @@ interface CreateRuleFormProps {
   userId: string
   triggerSource: 'comment' | 'dm' | 'story'
   onSuccess: () => void
+  editRule?: any | null // doluysa form DUZENLEME modunda calisir (PUT); parent key={} ile remount etmeli
 }
 
-export function CreateRuleForm({ userId, triggerSource, onSuccess }: CreateRuleFormProps) {
+const SPECIAL_TRIGGERS = ["ALL_COMMENTS", "ALL_MENTIONS", "ALL_REACTIONS", "ALL"]
+
+export function CreateRuleForm({ userId, triggerSource, onSuccess, editRule }: CreateRuleFormProps) {
   const [step, setStep] = useState(1)
 
+  // Duzenleme modunda mevcut kural degerleriyle basla
+  const er = editRule || null
+  const erContent = er?.response_content || {}
+  const erIsSpecial = SPECIAL_TRIGGERS.includes(er?.trigger_value || "")
+
   // Step 1: Trigger
-  const [replyToAll, setReplyToAll] = useState(false)
-  const [triggers, setTriggers] = useState<string[]>([])
-  const [storyTriggerType, setStoryTriggerType] = useState<'mention' | 'reaction' | 'reply'>('mention')
-  const [selectedReel, setSelectedReel] = useState<any | null>(null)
+  const [replyToAll, setReplyToAll] = useState(er?.trigger_type === "reply_all")
+  const [triggers, setTriggers] = useState<string[]>(
+    er && !erIsSpecial ? String(er.trigger_value || "").split(",").map((s: string) => s.trim()).filter(Boolean) : [],
+  )
+  const [storyTriggerType, setStoryTriggerType] = useState<'mention' | 'reaction' | 'reply'>(
+    er && ["mention", "reaction", "reply"].includes(er.trigger_type) ? er.trigger_type : 'mention',
+  )
+  const [selectedReel, setSelectedReel] = useState<any | null>(er?.specific_media_id ? { id: er.specific_media_id } : null)
   const [showReelPicker, setShowReelPicker] = useState(false)
 
   // Step 2: Response
-  const [type, setType] = useState<"text" | "card">("text")
-  const [messageText, setMessageText] = useState("")
-  const [cardTitle, setCardTitle] = useState("")
-  const [cardSubtitle, setCardSubtitle] = useState("")
-  const [cardImage, setCardImage] = useState("")
-  const [buttons, setButtons] = useState<ProButton[]>([])
+  const [type, setType] = useState<"text" | "card">(erContent.card ? "card" : "text")
+  const [messageText, setMessageText] = useState(erContent.message || "")
+  const [cardTitle, setCardTitle] = useState(erContent.card?.title || "")
+  const [cardSubtitle, setCardSubtitle] = useState(erContent.card?.subtitle || "")
+  const [cardImage, setCardImage] = useState(erContent.card?.image_url || "")
+  const [buttons, setButtons] = useState<ProButton[]>(
+    (erContent.card?.buttons || []).map((b: any, i: number) => ({
+      id: `edit-${i}`,
+      type: b.type || "web_url",
+      title: b.title || "",
+      url: b.url || "",
+      payload: b.payload || "",
+    })),
+  )
 
   // Step 3: Settings
-  const [name, setName] = useState("")
-  const [checkFollow, setCheckFollow] = useState(false)
+  const [name, setName] = useState(er?.name || "")
+  const [checkFollow, setCheckFollow] = useState(erContent.check_follow === true)
 
   // Media
   const [reels, setReels] = useState<any[]>([])
@@ -63,8 +83,15 @@ export function CreateRuleForm({ userId, triggerSource, onSuccess }: CreateRuleF
       setLoadingReels(true)
       const res = await fetch(`/api/instagram/media?userId=${userId}`)
       const responseJson = await res.json()
-      if (responseJson.data && Array.isArray(responseJson.data)) setReels(responseJson.data)
-      else if (Array.isArray(responseJson)) setReels(responseJson)
+      const list = responseJson.data && Array.isArray(responseJson.data)
+        ? responseJson.data
+        : Array.isArray(responseJson) ? responseJson : []
+      setReels(list)
+      // Duzenleme modunda secili gonderinin kapak gorselini tamamla
+      if (editRule?.specific_media_id) {
+        const found = list.find((r: any) => r.id === editRule.specific_media_id)
+        if (found) setSelectedReel(found)
+      }
     } catch (err) {
       console.error("[v0] Failed to load reels:", err)
     } finally {
@@ -141,11 +168,12 @@ export function CreateRuleForm({ userId, triggerSource, onSuccess }: CreateRuleF
     }
 
     try {
-      const loadingToast = toast.loading("Creating...")
+      const loadingToast = toast.loading(editRule ? "Güncelleniyor..." : "Creating...")
       const res = await fetch("/api/automations", {
-        method: "POST",
+        method: editRule ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          ...(editRule ? { id: editRule.id } : {}),
           userId,
           name,
           trigger_source: triggerSource,
@@ -161,7 +189,7 @@ export function CreateRuleForm({ userId, triggerSource, onSuccess }: CreateRuleF
 
       toast.dismiss(loadingToast)
       if (res.ok) {
-        toast.success("Automation Created! 🎉")
+        toast.success(editRule ? "Otomasyon güncellendi ✅" : "Automation Created! 🎉")
         // Reset everything
         setStep(1)
         setName("")
@@ -630,7 +658,7 @@ export function CreateRuleForm({ userId, triggerSource, onSuccess }: CreateRuleF
             onClick={handleSubmit}
             className="flex-1 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white font-bold h-11 rounded-xl shadow-lg shadow-emerald-500/20 active:scale-95 transition-all"
           >
-            <Sparkles className="w-4 h-4 mr-2" /> Create Automation
+            <Sparkles className="w-4 h-4 mr-2" /> {editRule ? "Değişiklikleri Kaydet" : "Create Automation"}
           </Button>
         )}
       </div>

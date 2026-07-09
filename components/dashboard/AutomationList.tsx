@@ -3,16 +3,17 @@
 import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Trash2, Globe, Instagram, Zap, ArrowRight, Lock, MessageCircle, Send } from "lucide-react"
+import { Trash2, Globe, Instagram, Zap, ArrowRight, Lock, MessageCircle, Send, Pencil } from "lucide-react"
 import type { Automation } from "@/lib/types"
 
 interface AutomationListProps {
   automations: Automation[]
   onDelete: (id: string) => void
+  onEdit?: (rule: Automation) => void
   userId: string
 }
 
-export function AutomationList({ automations, onDelete, userId }: AutomationListProps) {
+export function AutomationList({ automations, onDelete, onEdit, userId }: AutomationListProps) {
   const [mediaMap, setMediaMap] = useState<Record<string, string>>({})
 
   const globalRules = automations.filter((rule) => !rule.specific_media_id)
@@ -65,7 +66,7 @@ export function AutomationList({ automations, onDelete, userId }: AutomationList
               <Globe className="w-3 h-3" /> Global
             </div>
             {globalRules.map((rule, idx) => (
-              <RuleCard key={rule.id} rule={rule} onDelete={onDelete} index={idx} />
+              <RuleCard key={rule.id} rule={rule} onDelete={onDelete} onEdit={onEdit} index={idx} />
             ))}
           </div>
         )}
@@ -77,7 +78,7 @@ export function AutomationList({ automations, onDelete, userId }: AutomationList
               <Instagram className="w-3 h-3" /> Post Specific
             </div>
             {postSpecificRules.map((rule, idx) => (
-              <RuleCard key={rule.id} rule={rule} onDelete={onDelete} index={idx} mediaUrl={mediaMap[rule.specific_media_id || ""]} isSpecific />
+              <RuleCard key={rule.id} rule={rule} onDelete={onDelete} onEdit={onEdit} index={idx} mediaUrl={mediaMap[rule.specific_media_id || ""]} isSpecific />
             ))}
           </div>
         )}
@@ -86,9 +87,10 @@ export function AutomationList({ automations, onDelete, userId }: AutomationList
   )
 }
 
-function RuleCard({ rule, onDelete, index, isSpecific, mediaUrl }: {
+function RuleCard({ rule, onDelete, onEdit, index, isSpecific, mediaUrl }: {
   rule: Automation
   onDelete: (id: string) => void
+  onEdit?: (rule: Automation) => void
   index: number
   isSpecific?: boolean
   mediaUrl?: string
@@ -133,14 +135,27 @@ function RuleCard({ rule, onDelete, index, isSpecific, mediaUrl }: {
                 <Button size="sm" onClick={() => onDelete(rule.id)} className="h-7 text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/20">Delete</Button>
               </div>
             ) : (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setConfirming(true)}
-                className="h-7 w-7 text-neutral-600 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </Button>
+              <div className="flex items-center gap-1">
+                {onEdit && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => onEdit(rule)}
+                    title="Düzenle"
+                    className="h-7 w-7 text-neutral-600 hover:text-blue-400 hover:bg-blue-500/10 opacity-0 group-hover:opacity-100 transition-all"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setConfirming(true)}
+                  className="h-7 w-7 text-neutral-600 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </Button>
+              </div>
             )}
           </div>
 

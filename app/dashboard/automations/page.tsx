@@ -14,6 +14,7 @@ export default function AutomationsPage() {
     const [isLoading, setIsLoading] = useState(true)
     const [activeTab, setActiveTab] = useState<'comment' | 'dm' | 'story'>('comment')
     const [showCreateForm, setShowCreateForm] = useState(false)
+    const [editingRule, setEditingRule] = useState<Automation | null>(null)
     const [aiEnabled, setAiEnabled] = useState(false)
     const [aiLoading, setAiLoading] = useState(true)
     const [aiToggling, setAiToggling] = useState(false)
@@ -144,7 +145,10 @@ export default function AutomationsPage() {
                             </>
                         )}
                         <button
-                            onClick={() => setShowCreateForm(!showCreateForm)}
+                            onClick={() => {
+                                if (showCreateForm) setEditingRule(null)
+                                setShowCreateForm(!showCreateForm)
+                            }}
                             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95 ${
                                 showCreateForm 
                                     ? 'bg-white/10 text-white border border-white/20' 
@@ -210,12 +214,20 @@ export default function AutomationsPage() {
                 {/* Create Form (Collapsible) */}
                 {showCreateForm && (
                     <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6 animate-in fade-in slide-in-from-top-2 duration-300">
+                        {editingRule && (
+                            <div className="mb-4 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-blue-400">
+                                ✏️ Düzenleniyor: <span className="text-white normal-case tracking-normal">{editingRule.name}</span>
+                            </div>
+                        )}
                         <CreateRuleForm
+                            key={editingRule?.id ?? "new"}
                             userId={userId}
                             triggerSource={activeTab}
+                            editRule={editingRule}
                             onSuccess={() => {
                                 fetchAutomations()
                                 setShowCreateForm(false)
+                                setEditingRule(null)
                             }}
                         />
                     </div>
@@ -237,6 +249,11 @@ export default function AutomationsPage() {
                     <AutomationList
                         automations={filteredAutomations}
                         onDelete={handleDeleteRule}
+                        onEdit={(rule) => {
+                            setEditingRule(rule)
+                            setShowCreateForm(true)
+                            window.scrollTo({ top: 0, behavior: "smooth" })
+                        }}
                         userId={userId}
                     />
                 )}
