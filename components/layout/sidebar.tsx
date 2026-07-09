@@ -4,6 +4,7 @@ import type React from "react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Instagram, LayoutDashboard, Zap, LogOut, Settings, BarChart3, MessageSquare, Snowflake, Clapperboard, Trophy, Bot, SlidersHorizontal } from "lucide-react"
+import { AccountSwitcher } from "@/components/layout/AccountSwitcher"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 
@@ -105,26 +106,8 @@ export function Sidebar({ className, username = "Demo User", onLogout, onNavigat
       </div>
 
       <div className="p-4 border-t border-white/10">
-        <div className="flex items-center gap-3 px-3 py-3 rounded-xl bg-white/5 border border-white/10 backdrop-blur-sm group">
-          <div className="w-9 h-9 rounded-full bg-neutral-800 ring-2 ring-white/10 group-hover:ring-white/30 transition-all flex items-center justify-center">
-            <span className="text-xs font-bold text-neutral-400">{username.charAt(0).toUpperCase()}</span>
-          </div>
-          <div className="flex-1 overflow-hidden">
-            <p className="text-xs font-bold text-white truncate">{username}</p>
-            <div className="flex items-center gap-1">
-              <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-              <p className="text-[10px] text-neutral-500">Collective Üyesi</p>
-            </div>
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onLogout}
-            className="h-8 w-8 text-muted-foreground hover:text-red-400 hover:bg-red-500/10 rounded-full transition-colors"
-          >
-            <LogOut className="w-4 h-4" />
-          </Button>
-        </div>
+        {/* Postiz tarzi hesap degistirici: cikis/giris olmadan listeden sec */}
+        <AccountSwitcher />
       </div>
     </aside>
   )
