@@ -47,10 +47,32 @@ export default function DashboardPage() {
         fetchStats()
     }, [userId])
 
-    if (isSessionLoading || loading) {
+    if (isSessionLoading || (userId && loading)) {
         return (
             <div className="flex items-center justify-center min-h-[50vh]">
                 <Loader2 className="w-8 h-8 text-purple-500 animate-spin" />
+            </div>
+        )
+    }
+
+    // Instagram oturumu yok (ornek: gizli mod / yeni tarayici) — sonsuz spinner yerine yonlendir.
+    // Not: Instagram baglantisi tarayici hafizasinda tutulur; hesaba YENIDEN baglanmak
+    // mevcut kaydin ustune oturur, hicbir veri/otomasyon kaybolmaz.
+    if (!userId) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-6 gap-4">
+                <h2 className="text-xl font-semibold text-white">Bu tarayıcıda Instagram oturumu yok</h2>
+                <p className="text-sm text-neutral-400 max-w-md">
+                    Panel şifren doğru ✅ — ama Instagram hesap bağlantısı tarayıcı hafızasında tutulur ve bu
+                    pencerede (örn. gizli mod) boş. Normal pencereni kullan ya da hesabını yeniden bağla —
+                    otomasyonların ve verilerin aynen durur.
+                </p>
+                <a
+                    href="/"
+                    className="px-5 py-2.5 rounded-xl bg-white text-black text-sm font-bold hover:bg-white/90 transition"
+                >
+                    Instagram'ı Bağla
+                </a>
             </div>
         )
     }
