@@ -23,6 +23,7 @@ export function SchedulerSettings({ userId }: SchedulerSettingsProps) {
     const [endTime, setEndTime] = useState("21:00")
     const [postAsTrial, setPostAsTrial] = useState(false)
     const [trialStrategy, setTrialStrategy] = useState<"SS_PERFORMANCE" | "MANUAL">("SS_PERFORMANCE")
+    const [markAsAi, setMarkAsAi] = useState(false)
 
     // Status info
     const [nextRun, setNextRun] = useState<string | null>(null)
@@ -45,6 +46,7 @@ export function SchedulerSettings({ userId }: SchedulerSettingsProps) {
                     setEndTime(data.end_time || "21:00")
                     setPostAsTrial(data.post_as_trial === true)
                     setTrialStrategy(data.trial_strategy === "MANUAL" ? "MANUAL" : "SS_PERFORMANCE")
+                    setMarkAsAi(data.mark_as_ai === true)
                     setNextRun(data.next_run_at)
                     setCurrentIndex(data.current_sequence_index)
                 }
@@ -69,7 +71,8 @@ export function SchedulerSettings({ userId }: SchedulerSettingsProps) {
                     start_time: startTime,
                     end_time: endTime,
                     post_as_trial: postAsTrial,
-                    trial_strategy: trialStrategy
+                    trial_strategy: trialStrategy,
+                    mark_as_ai: markAsAi
                 })
             })
 
@@ -181,6 +184,20 @@ export function SchedulerSettings({ userId }: SchedulerSettingsProps) {
                         </p>
                     </div>
                 )}
+            </div>
+
+            {/* Yapay Zeka Etiketi (is_ai_generated) */}
+            <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <Label className="text-white">🤖 Yapay Zekâ Etiketi</Label>
+                        <p className="text-xs text-neutral-500 mt-1">
+                            Bu hesaptan çıkan TÜM reels'lere Instagram'ın resmi "Yapay zekâ bilgisi" etiketi eklenir
+                            (yasal beyan). Zamanlanmış paylaşımlar dahil.
+                        </p>
+                    </div>
+                    <Switch checked={markAsAi} onCheckedChange={setMarkAsAi} />
+                </div>
             </div>
 
             {nextRun && (

@@ -75,6 +75,7 @@ export async function GET() {
           post.caption || "",
           undefined,
           post.as_trial ? "SS_PERFORMANCE" : null,
+          post.as_ai === true, // yapay zeka etiketi
         )
         await supabase.from("scheduled_posts").update({ ig_container_id: containerId }).eq("id", post.id)
       }

@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
 
         // 2. Parse Body (trial: true -> deneme reelsi; trialStrategy: MANUAL | SS_PERFORMANCE;
         //    force: true -> tekrar-paylasim korumasini bilerek atla)
-        const { videoUrl, caption, userId, trial, trialStrategy, force } = await request.json()
+        const { videoUrl, caption, userId, trial, trialStrategy, force, aiGenerated } = await request.json()
         if (!videoUrl || !userId) {
             return NextResponse.json({ error: "Missing videoUrl or userId" }, { status: 400 })
         }
@@ -75,12 +75,20 @@ export async function POST(request: NextRequest) {
 
         // 4. Create Instagram Reels Container
         console.log(`[DirectPost] Creating container for user ${userId}${effectiveTrial ? " (deneme reelsi)" : ""}`)
+        // AI etiketi: body'de acikca gelmediyse hesabin scheduler ayarindan oku
+        let markAi = aiGenerated === true
+        if (aiGenerated === undefined) {
+            const { data: cfg } = await supabase.from("scheduler_config").select("mark_as_ai").eq("user_id", userId).single()
+            markAi = cfg?.mark_as_ai === true
+        }
+
         const containerId = await createReelsContainer(
             user.access_token,
             videoUrl,
             caption || "",
             undefined,
             effectiveTrial,
+            markAi,
         )
         if (effectiveTrial) await recordTrialPost(supabase, userId, containerId)
 

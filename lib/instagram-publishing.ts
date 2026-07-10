@@ -45,7 +45,7 @@ export async function recordTrialPost(supabase: any, userId: any, containerId: s
  * otomatik herkese açılır, MANUAL = Instagram uygulamasından elle açılır.
  * (Hesapta trial reels özelliği yoksa Meta container aşamasında hata döner.)
  */
-export async function createReelsContainer(accessToken: string, videoUrl: string, caption: string, coverUrl?: string, trialStrategy?: TrialStrategy | null): Promise<string> {
+export async function createReelsContainer(accessToken: string, videoUrl: string, caption: string, coverUrl?: string, trialStrategy?: TrialStrategy | null, aiGenerated?: boolean): Promise<string> {
     const endpoint = `https://graph.instagram.com/me/media`
 
     const params = new URLSearchParams({
@@ -63,6 +63,12 @@ export async function createReelsContainer(accessToken: string, videoUrl: string
     // Optional: Trial reel (deneme reelsi)
     if (trialStrategy) {
         params.append('trial_params', JSON.stringify({ graduation_strategy: trialStrategy }))
+    }
+
+    // Optional: Yapay zeka etiketi — Instagram'in resmi "AI info" beyani.
+    // Yasal AI vurgusu icin true gonderilir; IG icerikte AI etiketi gosterir.
+    if (aiGenerated) {
+        params.append('is_ai_generated', 'true')
     }
 
     const res = await fetch(`${endpoint}?${params.toString()}`, { method: 'POST' })

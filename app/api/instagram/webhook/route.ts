@@ -340,6 +340,26 @@ export async function POST(request: NextRequest) {
                     continue
                   }
                   await sleep(1500 + Math.random() * 2500)
+
+                  // FIX (10 Tem): gate dalinda public yorum cevabi HIC atilmiyordu —
+                  // takipci olmayan yorumcular "cevapsiz" kaliyordu. Kart DM'iyle
+                  // birlikte yoruma da public cevap gider.
+                  try {
+                    const gateReply = cust.publicReplies[Math.floor(Math.random() * cust.publicReplies.length)]
+                    const pubRes = await fetch(
+                      `https://graph.instagram.com/v24.0/${commentId}/replies?access_token=${encodeURIComponent(user.access_token)}`,
+                      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: gateReply }) },
+                    )
+                    const pubJson = await pubRes.json()
+                    if (pubJson.error) {
+                      console.error("[v0] 🔴 Gate public reply failed:", JSON.stringify(pubJson.error))
+                      await recordRateLimitHit(supabase, user.id, pubJson.error)
+                    } else console.log("[v0] 🟢 Gate public reply sent!")
+                  } catch (e) {
+                    console.error("[v0] 🔴 Gate public reply network error:", e)
+                  }
+                  await sleep(800 + Math.random() * 1200)
+
                   await fetch(
                     `https://graph.instagram.com/v24.0/me/messages?access_token=${encodeURIComponent(user.access_token)}`,
                     { method: "POST", headers: { "Content-Type": "application/json" },

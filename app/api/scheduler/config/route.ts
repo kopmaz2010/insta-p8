@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json()
-        const { userId, is_running, interval_minutes, start_time, end_time, post_as_trial, trial_strategy } = body
+        const { userId, is_running, interval_minutes, start_time, end_time, post_as_trial, trial_strategy, mark_as_ai } = body
 
         if (!userId) return NextResponse.json({ error: "Missing userId" }, { status: 400 })
 
@@ -41,6 +41,7 @@ export async function POST(request: NextRequest) {
             end_time,
             post_as_trial: post_as_trial === true,
             trial_strategy: trial_strategy === "MANUAL" ? "MANUAL" : "SS_PERFORMANCE",
+            mark_as_ai: mark_as_ai === true,
             updated_at: new Date().toISOString()
         }
 

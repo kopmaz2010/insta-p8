@@ -141,7 +141,7 @@ export async function GET(request: NextRequest) {
                     trialStrategy = null
                 }
                 if (trialStrategy) console.log(`[Scheduler] Deneme reelsi modu: ${trialStrategy}`)
-                const containerId = await createReelsContainer(user.access_token, clip.video_url, clip.caption, undefined, trialStrategy)
+                const containerId = await createReelsContainer(user.access_token, clip.video_url, clip.caption, undefined, trialStrategy, config.mark_as_ai === true)
                 if (trialStrategy) await recordTrialPost(supabase, config.user_id, containerId)
 
                 // B. Wait for Processing (Simple Polling)
