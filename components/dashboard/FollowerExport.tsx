@@ -44,9 +44,14 @@ export function FollowerExport() {
       const followerFiles: string[] = []
       let followingFile = ""
       zip.forEach((path) => {
-        const p = path.toLowerCase()
-        if (p.includes("followers") && p.endsWith(".json")) followerFiles.push(path)
-        if (p.includes("following") && p.endsWith(".json") && !p.includes("pending")) followingFile = path
+        // KRITIK: klasor adi "followers_and_following" oldugu icin TAM YOL
+        // her iki kelimeyi de icerir. Yalniz DOSYA ADINA bak.
+        const base = path.split("/").pop()?.toLowerCase() || ""
+        if (!base.endsWith(".json")) return
+        // followers_1.json, followers_2.json ... (birden fazla parca olabilir)
+        if (/^followers(_\d+)?\.json$/.test(base)) followerFiles.push(path)
+        // yalniz following.json (pending/recent/requests degil)
+        else if (base === "following.json") followingFile = path
       })
 
       if (followerFiles.length === 0 && !followingFile) {
