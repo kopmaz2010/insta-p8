@@ -6,6 +6,7 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Loader2, UserCheck, UserX, HelpCircle, Search, Users } from "lucide-react"
+import { FollowerExport } from "@/components/dashboard/FollowerExport"
 
 export default function FollowersPage() {
   const [loading, setLoading] = useState(false)
@@ -42,10 +43,12 @@ export default function FollowersPage() {
         Seninle <strong>etkileşime giren</strong> kişiler (DM atan, yorumdan puan kazanan) seni takip ediyor mu?
       </p>
       <div className="rounded-xl border border-yellow-500/20 bg-yellow-500/5 text-yellow-200/90 text-xs px-4 py-3 mb-5">
-        ⚠️ Instagram, tüm takipçi listeni API'ye açmaz (gizlilik). Bu yüzden yalnızca <strong>etkileşimli</strong>
-        kişileri kontrol edebiliriz — "hiç etkileşmemiş takipçiler" burada görünmez.
+        <strong>İki yöntem var:</strong> (1) Aşağıdaki buton — canlı API ile yalnızca <strong>etkileşimli</strong>
+        kişileri kontrol eder (anlık). (2) En altta <strong>Instagram Export</strong> — <strong>tüm</strong>
+        takipçi/takip listeni verir (Instagram'ın resmi indirmesi; tam liste için bunu kullan).
       </div>
 
+      <h2 className="text-sm font-bold text-neutral-300 mb-2">Yöntem 1 — Canlı etkileşim kontrolü</h2>
       <Button onClick={run} disabled={loading}>
         {loading ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Search className="w-4 h-4 mr-1" />}
         {loading ? "Kontrol ediliyor..." : "Takip Durumunu Kontrol Et"}
@@ -94,6 +97,9 @@ export default function FollowersPage() {
           </div>
         </div>
       )}
+
+      {/* Yontem 2 — tam liste (Instagram export ZIP) */}
+      <FollowerExport />
     </div>
   )
 }
