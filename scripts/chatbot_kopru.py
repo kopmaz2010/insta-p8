@@ -7,7 +7,7 @@
 # sadece metin uretir.
 #
 # Kurulum (bir kez):
-#   1) Ollama kurulu olmali:  ollama pull qwen2.5:3b
+#   1) Ollama kurulu olmali:  ollama pull gemma3:4b
 #   2) Sifreyi ortam degiskeni olarak ver (Vercel'deki API_SECRET_KEY):
 #        export INSTAAUTO_SECRET='...'
 # Calistir:
@@ -24,7 +24,8 @@ import urllib.request
 BASE_URL = os.environ.get("INSTAAUTO_URL", "https://project-80xl4-kopmaz2010s-projects.vercel.app")
 SECRET = os.environ.get("INSTAAUTO_SECRET", "")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b")
+# gemma3:4b: Turkce kalitesi qwen2.5:3b'den belirgin iyi (qwen cevaba Cince karistirdi)
+MODEL = os.environ.get("OLLAMA_MODEL", "gemma3:4b")
 POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "30"))
 
 TEKNIK_KURALLAR = (
