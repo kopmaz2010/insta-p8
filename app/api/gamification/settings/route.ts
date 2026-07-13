@@ -36,10 +36,19 @@ export async function GET(request: NextRequest) {
     const { data: settings } = await supabase.from("gamification_settings").select("*").eq("user_id", userId).single()
     const { data: ai } = await supabase.from("ai_settings").select("*").eq("user_id", userId).single()
 
+    // yerel kopru kuyrugunda bekleyen DM sayisi (panelde gosterilir)
+    const { count: aiPending } = await supabase
+      .from("webhook_events")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("event_type", "ai_pending")
+
     return NextResponse.json({
       settings: settings || null,
       ai: ai ? { enabled: ai.enabled, persona: ai.persona } : null,
       aiKeyPresent: Boolean(process.env.ANTHROPIC_API_KEY),
+      aiMode: process.env.ANTHROPIC_API_KEY ? "api" : "local",
+      aiPending: aiPending || 0,
     })
   } catch (error) {
     console.error("Gamification Settings GET Error:", error)

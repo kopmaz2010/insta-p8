@@ -94,7 +94,10 @@ async function claimEvent(supabase: any, key: string, type: string, userId: any)
   if (!error) return true
   if (error.code === "23505") return false // zaten islenmis
   console.error("[v0] claimEvent hatasi:", error)
-  return true // dedup altyapisi dusarse akisi durdurma
+  // FAIL-CLOSED: dedup dogrulanamiyorsa GONDERME. (Eskiden true donuyordu —
+  // Supabase kesintisinde dedup+limitler ayni anda kayboluyor, Meta retry'lari
+  // sinirsiz cift DM uretebiliyordu.)
+  return false
 }
 
 // FAZ1: hesap basina gunluk gonderim limiti
@@ -109,7 +112,7 @@ async function underDailyLimit(supabase: any, userId: any): Promise<boolean> {
     .gte("processed_at", dayStart.toISOString())
   if (error) {
     console.error("[v0] limit kontrol hatasi:", error)
-    return true
+    return false // FAIL-CLOSED: limit dogrulanamiyorsa gonderme
   }
   return (count || 0) < DAILY_DM_LIMIT
 }
@@ -212,11 +215,17 @@ export async function POST(request: NextRequest) {
           for (const candidate of allUsers) {
             if (!candidate.access_token) continue
             try {
-              const testRes = await fetch(
-                `https://graph.instagram.com/v24.0/${webhookId}?fields=id&access_token=${candidate.access_token}`
+              // KIMLIK DOGRULAMA: adayin KENDI /me kimligi webhook id'siyle
+              // birebir ayni olmali. (Eski yontem GET /{webhookId} 200 donerse
+              // sahiplenirdi — cok hesapli kurulumda yanlis hesaba eslenip
+              // DM'lerin YANLIS hesaptan gitmesine yol acabilirdi.)
+              const meRes = await fetch(
+                `https://graph.instagram.com/v24.0/me?fields=user_id,username&access_token=${candidate.access_token}`
               )
-              if (testRes.ok) {
-                console.log(`[v0] ✅ Token verified! ${webhookId} belongs to ${candidate.username}. Saving permanently.`)
+              const meRaw = await meRes.text()
+              const meUserId = /"user_id"\s*:\s*"?(\d+)"?/.exec(meRaw)?.[1]
+              if (meRes.ok && meUserId === String(webhookId)) {
+                console.log(`[v0] ✅ Identity verified! ${webhookId} = ${candidate.username}. Saving permanently.`)
                 await supabase
                   .from("users")
                   .update({ page_id: webhookId })
@@ -252,7 +261,8 @@ export async function POST(request: NextRequest) {
         for (const change of entry.changes) {
           if (change.field === "comments" && change.value?.text) {
             const commentId = change.value.id
-            const commentText = change.value.text.toLowerCase().trim()
+            // TR-lowercase: duz toLowerCase() "TAKASI"yi "takasi" yapar (noktasiz i kaybi) — eslesme kacar
+            const commentText = change.value.text.toLocaleLowerCase("tr").trim()
             const senderId = change.value.from.id
 
             const mediaId = change.value.media.id
@@ -272,8 +282,9 @@ export async function POST(request: NextRequest) {
             )
 
             // Priority 2: Specific Post + Keyword Match
+            // (yalnizca comment kaynakli kurallar — DM/story kurallari yoruma ateslenmez)
             if (!match) {
-              match = automations.find(
+              match = commentAutomations.find(
                 (a) =>
                   a.specific_media_id === mediaId &&
                   a.trigger_type === "keyword" &&
@@ -283,7 +294,7 @@ export async function POST(request: NextRequest) {
 
             // Priority 3: Global Keyword Match (Only if no specific match found)
             if (!match) {
-              match = automations.find(
+              match = commentAutomations.find(
                 (a) =>
                   !a.specific_media_id && // Must be global
                   a.trigger_type === "keyword" &&
@@ -360,19 +371,29 @@ export async function POST(request: NextRequest) {
                   }
                   await sleep(800 + Math.random() * 1200)
 
-                  await fetch(
-                    `https://graph.instagram.com/v24.0/me/messages?access_token=${encodeURIComponent(user.access_token)}`,
-                    { method: "POST", headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ recipient: { comment_id: commentId },
-                        message: { attachment: { type: "template", payload: { template_type: "generic", elements: [{
-                          title: cust.gateTitle,
-                          subtitle: cust.gateSubtitle,
-                          buttons: [
-                            { type: "web_url", url: `https://instagram.com/${user.username}`, title: cust.gateBtnProfile },
-                            { type: "postback", title: cust.gateBtnFollow, payload: `UNLOCK_CONTENT_${match.id}` }
-                          ]
-                        }] } } } }) }
-                  )
+                  try {
+                    const gateRes = await fetch(
+                      `https://graph.instagram.com/v24.0/me/messages?access_token=${encodeURIComponent(user.access_token)}`,
+                      { method: "POST", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ recipient: { comment_id: commentId },
+                          message: { attachment: { type: "template", payload: { template_type: "generic", elements: [{
+                            title: cust.gateTitle,
+                            subtitle: cust.gateSubtitle,
+                            buttons: [
+                              { type: "web_url", url: `https://instagram.com/${user.username}`, title: cust.gateBtnProfile },
+                              { type: "postback", title: cust.gateBtnFollow, payload: `UNLOCK_CONTENT_${match.id}` }
+                            ]
+                          }] } } } }) }
+                    )
+                    // cevabi oku: rate-limit hatalari devre kesiciyi beslesin
+                    const gateJson = await gateRes.json()
+                    if (gateJson.error) {
+                      console.error("[v0] 🔴 Gate card DM failed:", JSON.stringify(gateJson.error))
+                      await recordRateLimitHit(supabase, user.id, gateJson.error)
+                    }
+                  } catch (e) {
+                    console.error("[v0] 🔴 Gate card DM network error:", e)
+                  }
                   continue
                 }
               }
@@ -480,6 +501,9 @@ export async function POST(request: NextRequest) {
       // ============================================================
       //  PART A.5: STORY AUTOMATION HANDLING
       // ============================================================
+      // A.5'te eslesen story eventleri PART B'de TEKRAR islenmesin
+      // (ayni kisiye ikinci DM gitmesin) — mid'leri burada topluyoruz
+      const handledStoryMids = new Set<string>()
       if (entry.messaging) {
         for (const event of entry.messaging) {
           const senderId = event.sender.id
@@ -515,9 +539,10 @@ export async function POST(request: NextRequest) {
             const attachment = event.message.attachments[0]
             storyMediaId = attachment.payload?.url || null
 
+            // Mention eventinde gercek story media id GELMEZ (payload.url CDN linki) —
+            // spesifik-story kurali burada asla eslesemez; mention kurallari global calisir
             match = storyAutomations.find((a: any) =>
-              a.trigger_type === 'mention' &&
-              (!a.specific_media_id || a.specific_media_id === storyMediaId)
+              a.trigger_type === 'mention' && !a.specific_media_id
             )
           }
 
@@ -528,10 +553,14 @@ export async function POST(request: NextRequest) {
 
             match = storyAutomations.find((a: any) => {
               if (a.trigger_type !== 'reaction') return false
-              if (a.specific_media_id && a.specific_media_id !== storyMediaId) return false
+              // Reaction eventinde story media id yok (mid mesaj id'sidir) —
+              // spesifik-story reaction kurali eslesemez; yalnizca global kurallar
+              if (a.specific_media_id) return false
 
               const triggers = a.trigger_value?.split(',').map((t: string) => t.trim()) || []
-              if (triggers.length > 0 && triggers[0] !== 'ALL' && triggers[0] !== '') {
+              // 'ALL_REACTIONS' (UI'nin gonderdigi deger, kucuk harfe cevrilmis olabilir) = filtre yok
+              const t0 = (triggers[0] || '').toUpperCase()
+              if (triggers.length > 0 && t0 !== 'ALL' && t0 !== 'ALL_REACTIONS' && t0 !== '') {
                 return triggers.includes(reactionEmoji)
               }
               return true
@@ -558,6 +587,7 @@ export async function POST(request: NextRequest) {
           // Send response if match found
           if (match) {
             console.log(`✨ Story automation matched: ${match.name}`)
+            if (event.message?.mid) handledStoryMids.add(event.message.mid)
 
             // MADDE 3 (10-ACIK): story cevaplari da dedup + limit + devre kesici
             // zincirinden gecer (Meta retry'inda cift DM ve story flood'u engeller).
@@ -638,6 +668,8 @@ export async function POST(request: NextRequest) {
       if (entry.messaging) {
         for (const event of entry.messaging) {
           if (event.read || event.delivery || event.reaction || event.message?.is_echo) continue
+          // A.5'te story otomasyonu eslesen event — ikinci DM atma
+          if (event.message?.mid && handledStoryMids.has(event.message.mid)) continue
 
           const senderId = event.sender.id
           if (senderId === webhookId || senderId === user.business_account_id || senderId === user.page_id) continue
@@ -651,7 +683,7 @@ export async function POST(request: NextRequest) {
             triggerValue = event.message.quick_reply.payload
           } else if (event.message?.text) {
             triggerType = "keyword"
-            triggerValue = event.message.text.toLowerCase().trim()
+            triggerValue = event.message.text.toLocaleLowerCase("tr").trim()
           } else if (event.postback?.payload) {
             triggerType = "postback"
             triggerValue = event.postback.payload
@@ -674,12 +706,17 @@ export async function POST(request: NextRequest) {
           try {
             // A. Upsert Conversation
             // We try to find an existing conv first to get the ID
-            let { data: conv } = await supabase
+            // NOT .single(): es zamanli iki DM ayni kisiden cift conversation
+            // yaratabiliyor — .single() o durumda hata verip kaydi tamamen
+            // engelliyordu. Ilk (en eski) kayit esas alinir.
+            const { data: convRows } = await supabase
               .from("conversations")
               .select("id")
               .eq("user_id", user.id)
               .eq("recipient_id", senderId)
-              .single()
+              .order("created_at", { ascending: true })
+              .limit(1)
+            let conv = convRows?.[0] || null
 
             if (!conv) {
               // Create new conversation
@@ -791,8 +828,9 @@ export async function POST(request: NextRequest) {
               match = automations.find((a) => a.trigger_type === "postback" && a.trigger_value === triggerValue)
             }
           } else {
+            // yalnizca DM kaynakli kurallar — comment/story kurallari DM'e ateslenmez
             match = automations.find(
-              (a) => a.trigger_type === "keyword" && keywordMatches(triggerValue, a.trigger_value),
+              (a) => a.trigger_source === "dm" && a.trigger_type === "keyword" && keywordMatches(triggerValue, a.trigger_value),
             )
           }
 
@@ -915,12 +953,14 @@ export async function POST(request: NextRequest) {
               // We need to find the conversation ID again (or pass it down)
               // For safety, we just re-query or use the one if we scoped it.
               // Doing a quick localized lookup for robustness:
-              const { data: conv } = await supabase
+              const { data: convRows2 } = await supabase
                 .from("conversations")
                 .select("id")
                 .eq("user_id", user.id)
                 .eq("recipient_id", senderId)
-                .single()
+                .order("created_at", { ascending: true })
+                .limit(1)
+              const conv = convRows2?.[0] || null
 
               if (conv) {
                 await supabase.from("messages").insert({

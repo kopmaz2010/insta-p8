@@ -16,7 +16,7 @@ export function IceBreakersManager() {
     const [fetching, setFetching] = useState(true)
 
     useEffect(() => {
-        if (!userId) return
+        if (!userId) { setFetching(false); return } // hesap yoksa sonsuz spinner olmasin
         fetch(`/api/ice-breakers?userId=${userId}`)
             .then(res => res.json())
             .then(data => {

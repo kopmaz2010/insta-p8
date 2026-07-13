@@ -18,50 +18,33 @@ export default function AutomationsPage() {
     const [aiEnabled, setAiEnabled] = useState(false)
     const [aiLoading, setAiLoading] = useState(true)
     const [aiToggling, setAiToggling] = useState(false)
-    const [showAiContext, setShowAiContext] = useState(false)
-    const [aiContext, setAiContext] = useState("")
-    const [aiContextSaving, setAiContextSaving] = useState(false)
-    const [aiContextSaved, setAiContextSaved] = useState(false)
 
+    // Chatbot durumu tek kaynaktan okunur: /api/gamification/settings (ai.enabled).
+    // Eski kod var olmayan /api/groq/auto-reply'a gidiyordu — buton hep OFF kaliyordu.
     useEffect(() => {
         if (!userId) return
-        fetch(`/api/groq/auto-reply?userId=${userId}`)
+        fetch(`/api/gamification/settings?userId=${userId}`)
             .then(res => res.json())
-            .then(data => {
-                setAiEnabled(data.enabled ?? false)
-                setAiContext(data.ai_context ?? "")
-            })
+            .then(data => setAiEnabled(data.ai?.enabled === true))
             .catch(() => {})
             .finally(() => setAiLoading(false))
     }, [userId])
-
-    const handleSaveAiContext = async () => {
-        if (aiContextSaving) return
-        setAiContextSaving(true)
-        try {
-            await fetch("/api/groq/auto-reply", {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ userId, enabled: aiEnabled, ai_context: aiContext }),
-            })
-            setAiContextSaved(true)
-            setTimeout(() => setAiContextSaved(false), 2000)
-        } catch {}
-        setAiContextSaving(false)
-    }
 
     const handleToggleAI = async () => {
         if (aiToggling) return
         setAiToggling(true)
         const newState = !aiEnabled
         try {
-            const res = await fetch("/api/groq/auto-reply", {
+            const res = await fetch("/api/gamification/settings", {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ userId, enabled: newState }),
+                body: JSON.stringify({ userId, ai: { enabled: newState } }),
             })
             if (res.ok) setAiEnabled(newState)
-        } catch {}
+            else alert("Chatbot durumu kaydedilemedi")
+        } catch {
+            alert("Chatbot durumu kaydedilemedi")
+        }
         setAiToggling(false)
     }
 
@@ -123,13 +106,13 @@ export default function AutomationsPage() {
                             <Loader2 className="w-4 h-4 text-neutral-500 animate-spin" />
                         ) : (
                             <>
-                                <button
-                                    onClick={() => setShowAiContext(!showAiContext)}
+                                <a
+                                    href="/dashboard/chatbot"
                                     className="p-2 rounded-xl bg-white/5 border border-white/10 text-neutral-500 hover:text-white hover:bg-white/10 transition-all"
-                                    title="AI Settings"
+                                    title="Chatbot kuralları"
                                 >
                                     <Brain className="w-3.5 h-3.5" />
-                                </button>
+                                </a>
                                 <button
                                     onClick={handleToggleAI}
                                     disabled={aiToggling}
@@ -160,31 +143,6 @@ export default function AutomationsPage() {
                         </button>
                     </div>
                 </div>
-
-                {/* AI Context Panel */}
-                {showAiContext && (
-                    <div className="rounded-2xl border border-purple-500/20 bg-purple-500/5 p-5 animate-in fade-in slide-in-from-top-2 duration-200 space-y-3">
-                        <div className="flex items-center gap-2">
-                            <Brain className="w-4 h-4 text-purple-400" />
-                            <span className="text-sm font-semibold text-purple-300">AI Personality Context</span>
-                        </div>
-                        <p className="text-xs text-neutral-500">Tell AI about your account — niche, products, tone, what to say/avoid. More context = more human replies.</p>
-                        <textarea
-                            value={aiContext}
-                            onChange={e => setAiContext(e.target.value)}
-                            placeholder={`e.g. This is a fitness coaching account. I sell online training programs (₹2999/mo). My tone is motivating but chill. If someone asks about pricing, tell them to DM for a free consultation. Never promise specific results.`}
-                            rows={4}
-                            className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-neutral-600 resize-none focus:outline-none focus:border-purple-500/50 transition-colors"
-                        />
-                        <button
-                            onClick={handleSaveAiContext}
-                            disabled={aiContextSaving}
-                            className="px-4 py-2 rounded-xl bg-purple-500 hover:bg-purple-400 text-white text-xs font-bold transition-all disabled:opacity-50"
-                        >
-                            {aiContextSaving ? 'Saving...' : aiContextSaved ? 'Saved ✓' : 'Save Context'}
-                        </button>
-                    </div>
-                )}
 
                 {/* Pill Tabs */}
                 <div className="flex gap-1 bg-white/5 p-1 rounded-xl border border-white/5">

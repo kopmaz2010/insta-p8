@@ -16,6 +16,7 @@ const PUBLIC_PREFIXES = [
   "/api/instagram/callback", // OAuth donusu
   "/api/cron/",              // Vercel cron + GitHub Actions (opsiyonel CRON_SECRET)
   "/api/hooks/",             // x-api-secret ile korunuyor
+  "/api/chatbot/bridge",     // x-api-secret ile korunuyor (yerel kopru)
   "/api/auth/login",         // giris ucu
 ]
 

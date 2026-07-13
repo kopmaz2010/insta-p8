@@ -26,8 +26,12 @@ export default function GirisPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password }),
       })
-      if (res.ok) window.location.href = "/dashboard" // hard nav: cookie kesin islensin
-      else setError("Şifre hatalı")
+      if (res.ok) {
+        // hard nav: cookie kesin islensin; ?next= varsa oraya don (OAuth ?code korunur)
+        const next = new URLSearchParams(window.location.search).get("next")
+        const safe = next && next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard"
+        window.location.href = safe
+      } else setError("Şifre hatalı")
     } catch {
       setError("Bağlantı hatası")
     } finally {

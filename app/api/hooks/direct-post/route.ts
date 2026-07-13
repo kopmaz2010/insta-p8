@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
         if (!force) {
             const { data: dupe } = await supabase
                 .from("reels_posts")
-                .select("id, published_at")
+                .select("id, status, published_at")
                 .eq("user_id", userId)
                 .eq("video_url", videoUrl)
                 .in("status", ["PUBLISHED", "success"])
@@ -59,6 +59,24 @@ export async function POST(request: NextRequest) {
                     error: "Bu video bu hesapta zaten paylaşılmış (tekrar-paylaşım koruması). Bilerek tekrar paylaşmak için force:true gönderin.",
                     duplicate: true,
                     previousPublishedAt: dupe[0].published_at,
+                }, { status: 409 })
+            }
+            // ISLEMDE olan ayni video da engellenir (retry/timeout senaryosu):
+            // container olusturuldu ama henuz publish edilmedi — ikinci container acma
+            const { data: inflight } = await supabase
+                .from("reels_posts")
+                .select("id, ig_container_id")
+                .eq("user_id", userId)
+                .eq("video_url", videoUrl)
+                .eq("status", "PENDING")
+                .gte("created_at", new Date(Date.now() - 2 * 3600_000).toISOString())
+                .limit(1)
+            if (inflight?.length) {
+                return NextResponse.json({
+                    error: "Bu video için zaten işlemde bir container var (çift paylaşım koruması).",
+                    duplicate: true,
+                    containerId: inflight[0].ig_container_id,
+                    userId,
                 }, { status: 409 })
             }
         }
@@ -91,6 +109,16 @@ export async function POST(request: NextRequest) {
             markAi,
         )
         if (effectiveTrial) await recordTrialPost(supabase, userId, containerId)
+
+        // 4.5 PENDING kaydi: dupe korumasi publish'ten ONCE de gorsun; publish-reel
+        // bu kaydi claim edip gunceller (insert degil) — video_url asla kaybolmaz
+        await supabase.from("reels_posts").insert({
+            user_id: userId,
+            video_url: videoUrl,
+            caption: caption || "",
+            ig_container_id: containerId,
+            status: "PENDING",
+        })
 
         // 5. Return immediately (Client handles polling)
         // This avoids Vercel 10s/60s function timeouts

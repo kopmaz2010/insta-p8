@@ -20,8 +20,12 @@ export default function DashboardLayout({
         fetch("/api/auth/login")
             .then((r) => r.json())
             .then((d) => {
-                if (d.protected && !d.authenticated) window.location.href = "/giris"
-                else setAuthChecked(true)
+                if (d.protected && !d.authenticated) {
+                    // OAuth donusundeki ?code=... kaybolmasin: giristen sonra
+                    // ayni URL'e (query dahil) geri donulur
+                    const next = encodeURIComponent(window.location.pathname + window.location.search)
+                    window.location.href = `/giris?next=${next}`
+                } else setAuthChecked(true)
             })
             .catch(() => setAuthChecked(true)) // kontrol edilemezse paneli engelleme
     }, [])

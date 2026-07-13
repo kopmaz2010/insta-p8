@@ -33,20 +33,28 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: "Invalid payload" }, { status: 400 })
         }
 
+        // DOGRULAMA once: bos soru/cevap NOT NULL patlatir; eskiden delete
+        // insert'ten ONCE kostugu icin gecersiz payload TUM listeyi siliyordu
+        const clean = iceBreakers
+            .map((ib: any) => ({ question: String(ib?.question || "").trim(), response: String(ib?.response || "").trim() }))
+            .filter((ib: any) => ib.question && ib.response)
+        if (clean.length !== iceBreakers.length) {
+            return NextResponse.json({ error: "Boş soru/cevap olamaz" }, { status: 400 })
+        }
+
         const supabase = await getSupabaseServerClient()
 
-        // 1. Update Database (Replace all for simplicity or Upsert)
-        // Strategy: Delete all for user and re-insert. Simple and effective for limited list (max 4).
-        const { error: deleteError } = await supabase
+        // 1. ONCE yeni kayitlari ekle, sonra eskileri sil (insert basarisizsa
+        // eski liste dokunulmadan kalir)
+        const { data: existing } = await supabase
             .from("ice_breakers")
-            .delete()
+            .select("id")
             .eq("user_id", userId)
-
-        if (deleteError) throw deleteError
+        const oldIds = (existing || []).map((r: any) => r.id)
 
         const { data: inserted, error: insertError } = await supabase
             .from("ice_breakers")
-            .insert(iceBreakers.map((ib: any) => ({
+            .insert(clean.map((ib: any) => ({
                 user_id: userId,
                 question: ib.question,
                 response: ib.response,
@@ -55,6 +63,14 @@ export async function POST(request: NextRequest) {
             .select()
 
         if (insertError) throw insertError
+
+        if (oldIds.length) {
+            const { error: deleteError } = await supabase
+                .from("ice_breakers")
+                .delete()
+                .in("id", oldIds)
+            if (deleteError) console.error("Ice Breaker eski kayit silme hatasi:", deleteError)
+        }
 
         // 2. Sync to Instagram
         const { data: user } = await supabase.from("users").select("access_token, page_id").eq("id", userId).single()

@@ -21,7 +21,8 @@ export function ChatbotManager() {
   const [saving, setSaving] = useState(false)
   const [enabled, setEnabled] = useState(false)
   const [persona, setPersona] = useState("")
-  const [aiKeyPresent, setAiKeyPresent] = useState(false)
+  const [aiMode, setAiMode] = useState<"local" | "api">("local")
+  const [aiPending, setAiPending] = useState(0)
   const [username, setUsername] = useState("")
 
   useEffect(() => {
@@ -37,7 +38,8 @@ export function ChatbotManager() {
       .then((s) => {
         setEnabled(s.ai?.enabled === true)
         setPersona(s.ai?.persona || "")
-        setAiKeyPresent(Boolean(s.aiKeyPresent))
+        setAiMode(s.aiMode === "api" ? "api" : "local")
+        setAiPending(s.aiPending || 0)
       })
       .catch(() => toast.error("Chatbot ayarları yüklenemedi"))
       .finally(() => setLoading(false))
@@ -66,7 +68,18 @@ export function ChatbotManager() {
   // Anahtar degisince aninda kaydet — "site uzerinden kapatip acabilelim"
   const toggle = async (v: boolean) => {
     setEnabled(v)
-    await save(v)
+    try {
+      const res = await fetch("/api/gamification/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, ai: { enabled: v, persona } }),
+      })
+      if (!res.ok) throw new Error()
+      toast.success(v ? "Chatbot açıldı ✅" : "Chatbot kapatıldı")
+    } catch {
+      setEnabled(!v) // kaydedilemedi: anahtar gercek durumu gostersin
+      toast.error("Kaydedilemedi — durum değişmedi")
+    }
   }
 
   if (loading)
@@ -105,15 +118,28 @@ export function ChatbotManager() {
             </div>
           </div>
         </div>
-        <Switch checked={enabled} disabled={!aiKeyPresent || saving} onCheckedChange={toggle} />
+        <Switch checked={enabled} disabled={saving} onCheckedChange={toggle} />
       </div>
 
-      {!aiKeyPresent && (
-        <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 text-yellow-200 text-sm px-4 py-3 mb-4">
-          ⚠️ Chatbot'un çalışması için Vercel ortam değişkenlerine <code className="font-mono">ANTHROPIC_API_KEY</code>{" "}
-          eklenmeli (sonrasında yeniden deploy). Eklenene kadar anahtar kilitli kalır.
-        </div>
-      )}
+      {/* Calisma modu */}
+      <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 text-sky-200/90 text-xs px-4 py-3 mb-4">
+        {aiMode === "api" ? (
+          <>
+            <strong>Mod: API</strong> — cevaplar Vercel üzerinden anında üretilir (ANTHROPIC_API_KEY tanımlı).
+          </>
+        ) : (
+          <>
+            <strong>Mod: Yerel Köprü</strong> — API anahtarı gerekmez. Eşleşmeyen DM'ler kuyruğa alınır; Mac'te
+            çalışan <code className="font-mono">scripts/chatbot_kopru.py</code> cevapları yerel modelle (Ollama)
+            üretip gönderir. Script çalışmıyorsa mesajlar 20 saat bekler, sonra cevapsız düşer.
+            {aiPending > 0 && (
+              <span className="ml-2 inline-block rounded-md bg-amber-500/20 text-amber-200 px-2 py-0.5">
+                Kuyrukta {aiPending} mesaj bekliyor
+              </span>
+            )}
+          </>
+        )}
+      </div>
 
       {/* Kurallar */}
       <div className="rounded-2xl border border-white/10 bg-white/5 p-5">

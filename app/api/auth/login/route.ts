@@ -36,7 +36,9 @@ export async function POST(request: Request) {
   const res = NextResponse.json({ ok: true })
   res.cookies.set("ia_auth", `${exp}.${sig}`, {
     httpOnly: true,
-    secure: true,
+    // localhost/LAN (http) erisiminde Secure cookie dusuyor ve giris donguye
+    // giriyordu — callback'teki insta_session ile ayni kosul kullanilir
+    secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
     maxAge: 7 * 86400,

@@ -39,11 +39,17 @@ export async function POST(request: NextRequest) {
 
     const supabase = await getSupabaseServerClient()
 
+    // OZEL DEGERLER (ALL/ALL_REACTIONS/ALL_MENTIONS) kucultulmez — webhook
+    // bunlari buyuk harf bekler; kucultulunce reaction kurallari hic ateslenmiyordu.
+    const SPECIAL_TRIGGERS = new Set(["ALL", "ALL_REACTIONS", "ALL_MENTIONS"])
+    const normTrigger = (v: string) =>
+      SPECIAL_TRIGGERS.has(String(v).trim().toUpperCase()) ? String(v).trim().toUpperCase() : v.toLocaleLowerCase("tr")
+
     // STABLE FIX: Always save to the Login ID
     const finalTriggerValue =
       trigger_type === "postback"
         ? `PAYLOAD_${Date.now()}_${Math.random().toString(36).substring(7)}`
-        : trigger_value.toLowerCase()
+        : normTrigger(trigger_value)
 
     const { data, error } = await supabase
       .from("automations")
@@ -98,10 +104,14 @@ export async function PUT(request: NextRequest) {
 
     const supabase = await getSupabaseServerClient()
 
+    const SPECIAL_TRIGGERS = new Set(["ALL", "ALL_REACTIONS", "ALL_MENTIONS"])
+    const normTrigger = (v: string) =>
+      SPECIAL_TRIGGERS.has(String(v).trim().toUpperCase()) ? String(v).trim().toUpperCase() : v.toLocaleLowerCase("tr")
+
     const updateData: any = {
       name,
       trigger_type: trigger_type || "keyword",
-      trigger_value: trigger_value.toLowerCase(),
+      trigger_value: normTrigger(trigger_value),
       response_content: content,
       specific_media_id: specific_media_id || null,
     }

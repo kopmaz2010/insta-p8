@@ -443,10 +443,11 @@ export function ContentPool({ userId }: ContentPoolProps) {
                             if (v === 'instagram') loadInstagramMedia()
                             if (v === 'spy') setIgMedia([]) // Clear for spy search
                         }}>
-                            <TabsList className="grid w-full grid-cols-5 bg-black/40">
+                            {/* "Spy" sekmesi kaldirildi: /api/instagram/discovery endpoint'i
+                                hic var olmadi, sekme her zaman "Spy failed" veriyordu */}
+                            <TabsList className="grid w-full grid-cols-4 bg-black/40">
                                 <TabsTrigger value="file">Files</TabsTrigger>
                                 <TabsTrigger value="instagram">My Reels</TabsTrigger>
-                                <TabsTrigger value="spy">Spy / Analyze</TabsTrigger>
                                 <TabsTrigger value="url">Link</TabsTrigger>
                                 <TabsTrigger value="json">JSON</TabsTrigger>
                             </TabsList>
@@ -532,18 +533,8 @@ export function ContentPool({ userId }: ContentPoolProps) {
                                         </>
                                     )}
 
-                                    <div className="flex items-center gap-2 mt-4 border border-green-500/20 bg-green-500/10 p-2 rounded">
-                                        <input
-                                            type="checkbox"
-                                            checked={isSafeMode}
-                                            onChange={(e) => setIsSafeMode(e.target.checked)}
-                                            className="w-4 h-4 accent-green-500 cursor-pointer"
-                                        />
-                                        <div className="flex flex-col">
-                                            <span className="text-sm font-bold text-green-400">Enable Safe Mode (Remix)</span>
-                                            <span className="text-[10px] text-neutral-400">Zooms & Adjusts speed to bypass 'Duplicate Content' filters. (Slower)</span>
-                                        </div>
-                                    </div>
+                                    {/* Safe Mode kaldirildi: /api/proxy endpoint'i hic var olmadi;
+                                        isaretlenince hicbir video import edilemiyordu */}
 
                                     {(igMedia.length > 0) && (inputType === "instagram" || inputType === "spy") && (
                                         <div className="space-y-2">

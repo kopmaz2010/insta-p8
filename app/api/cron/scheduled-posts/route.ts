@@ -24,7 +24,7 @@ export async function GET() {
   const { data: due } = await supabase
     .from("scheduled_posts")
     .select("*")
-    .in("status", ["pending", "processing"])
+    .in("status", ["pending", "processing", "publishing"])
     .lte("scheduled_at", new Date().toISOString())
     .order("scheduled_at", { ascending: true })
     .limit(2) // 60 sn butcesi: kosu basina en fazla 2 kayit
@@ -34,7 +34,15 @@ export async function GET() {
     const log: any = { id: post.id, video: (post.video_url || "").split("/").pop() }
     try {
       const { data: user } = await supabase.from("users").select("*").eq("id", post.user_id).single()
-      if (!user?.access_token) throw new Error("kullanici/token bulunamadi")
+      if (!user?.access_token) {
+        // kalici hata: tekrar denemenin anlami yok, kuyrugun basini tikamasin
+        await supabase
+          .from("scheduled_posts")
+          .update({ status: "error", error_message: "kullanici/token bulunamadi" })
+          .eq("id", post.id)
+        results.push({ ...log, status: "hata:token-yok" })
+        continue
+      }
 
       // TEKRAR-PAYLASIM KORUMASI: ayni video bu hesapta zaten yayinlandiysa iptal
       if (post.status === "pending") {
@@ -69,14 +77,25 @@ export async function GET() {
           results.push({ ...log, status: "baska-kosu-isliyor" })
           continue
         }
-        containerId = await createReelsContainer(
-          user.access_token,
-          post.video_url,
-          post.caption || "",
-          undefined,
-          post.as_trial ? "SS_PERFORMANCE" : null,
-          post.as_ai === true, // yapay zeka etiketi
-        )
+        try {
+          containerId = await createReelsContainer(
+            user.access_token,
+            post.video_url,
+            post.caption || "",
+            undefined,
+            post.as_trial ? "SS_PERFORMANCE" : null,
+            post.as_ai === true, // yapay zeka etiketi
+          )
+        } catch (ce: any) {
+          // container hic olusmadi → 'processing'de birakma; kayit kalici hataya
+          // dusurulur ki kuyrugun basini sonsuza dek tikamasin (panelden gorunur)
+          await supabase
+            .from("scheduled_posts")
+            .update({ status: "error", error_message: `container olusturulamadi: ${String(ce?.message || ce)}` })
+            .eq("id", post.id)
+          results.push({ ...log, status: "hata:container", error: String(ce?.message || ce) })
+          continue
+        }
         await supabase.from("scheduled_posts").update({ ig_container_id: containerId }).eq("id", post.id)
       }
 
@@ -91,10 +110,20 @@ export async function GET() {
 
       if (st === "PUBLISHED") {
         // Onceki kosuda publish timeout olmus ama yayin GERCEKLESMIS — tekrar yayinlama!
+        const recIso = new Date().toISOString()
         await supabase
           .from("scheduled_posts")
-          .update({ status: "published", published_at: new Date().toISOString(), error_message: null })
+          .update({ status: "published", published_at: recIso, error_message: null })
           .eq("id", post.id)
+        // dupe korumasi reels_posts'a bakar — kurtarilan yayini da kaydet
+        await supabase.from("reels_posts").insert({
+          user_id: post.user_id,
+          video_url: post.video_url,
+          caption: post.caption,
+          ig_container_id: containerId,
+          status: "PUBLISHED",
+          published_at: recIso,
+        })
         results.push({ ...log, status: "published(kurtarildi)" })
         continue
       }
@@ -108,6 +137,38 @@ export async function GET() {
           .update({ status: "error", error_message: `container durumu: ${st}` })
           .eq("id", post.id)
         results.push({ ...log, status: `hata:${st}` })
+        continue
+      }
+
+      // YAYIN CLAIM'i: publish adimi da tek kosuya kilitlenir (cift yayin onlenir).
+      // 'publishing'de kalmis eski kayit (kosu olurse): 15 dk sonra error_message
+      // uzerinden CAS ile yeniden claim edilir; PUBLISHED kurtarmasi yukarida.
+      const pubStamp = `publishing:${new Date().toISOString()}`
+      let claimedPublish = false
+      if (post.status === "publishing") {
+        const m = /^publishing:(.+)$/.exec(post.error_message || "")
+        const since = m ? new Date(m[1]).getTime() : 0
+        if (Date.now() - since > 15 * 60_000) {
+          const { data: rec } = await supabase
+            .from("scheduled_posts")
+            .update({ error_message: pubStamp })
+            .eq("id", post.id)
+            .eq("status", "publishing")
+            .eq("error_message", post.error_message)
+            .select("id")
+          claimedPublish = Boolean(rec?.length)
+        }
+      } else {
+        const { data: pub } = await supabase
+          .from("scheduled_posts")
+          .update({ status: "publishing", error_message: pubStamp })
+          .eq("id", post.id)
+          .eq("status", "processing")
+          .select("id")
+        claimedPublish = Boolean(pub?.length)
+      }
+      if (!claimedPublish) {
+        results.push({ ...log, status: "yayin-baska-kosuda" })
         continue
       }
 

@@ -3,10 +3,18 @@
 // ============================================================
 // AI YONETICI — ChatPlace "AI yönetici" muadili
 // Hicbir otomasyon/oyunlastirma komutu eslesmeyen DM'lere, panelden
-// duzenlenen persona (iletisim kurallari) ile Claude uzerinden cevap verir.
-// Gereksinim: Vercel env'de ANTHROPIC_API_KEY + panelde "aktif".
-// Politika: yalnizca gelen mesaja cevap verir (24s penceresi acik),
-// gunluk/saatlik limitler + devre kesici aynen uygulanir.
+// duzenlenen persona (iletisim kurallari) ile cevap verir.
+//
+// IKI MOD:
+//  1) YEREL KOPRU (varsayilan, API anahtari GEREKMEZ): mesaj
+//     webhook_events'e 'ai_pending' olarak kuyruklanir. Mac'te calisan
+//     scripts/chatbot_kopru.py bunlari /api/chatbot/bridge'den ceker,
+//     yerel Ollama ile cevabi uretir, ayni endpoint uzerinden gonderir.
+//  2) API MODU: Vercel env'de ANTHROPIC_API_KEY varsa dogrudan Claude
+//     API ile aninda cevaplanir (eski davranis).
+//
+// Politika (iki modda da): yalnizca gelen mesaja cevap verilir (24s
+// penceresi acik), gunluk/saatlik limitler + devre kesici uygulanir.
 // ============================================================
 
 import { rateLimitCoolingDown, recordRateLimitHit, underHourlyLimit } from "@/lib/gamification"
@@ -21,12 +29,14 @@ export async function getAiSettings(supabase: any, userId: any) {
 
 // Son mesajlardan kisa konusma gecmisi (AI baglami icin)
 async function recentHistory(supabase: any, userId: any, senderId: any, limit = 6) {
-  const { data: conv } = await supabase
+  const { data: convRows } = await supabase
     .from("conversations")
     .select("id")
     .eq("user_id", userId)
     .eq("recipient_id", String(senderId))
-    .single()
+    .order("created_at", { ascending: true })
+    .limit(1)
+  const conv = convRows?.[0]
   if (!conv) return []
   const { data: msgs } = await supabase
     .from("messages")
@@ -54,11 +64,19 @@ export async function handleAiAssistant(ctx: {
 }): Promise<boolean> {
   const { supabase, user, senderId, text, evKey, claimEvent, underDailyLimit } = ctx
 
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) return false
   const ai = await getAiSettings(supabase, user.id)
   if (!ai?.enabled || !ai.persona) return false
   if (!text || text.length < 2) return false
+
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) {
+    // YEREL KOPRU MODU: kuyruga yaz, cevabi Mac'teki kopru scripti verecek.
+    // event_type 'ai_pending' — limit sayaclari 'send%' filtreledigi icin karismaz.
+    // evKey = mid_<mesaj-id>; bridge mesaji messages tablosundan bu id ile bulur.
+    const queued = await claimEvent(supabase, `aiq_${evKey}`, "ai_pending", user.id)
+    if (queued) console.log(`[v0] 📥 AI kuyruga eklendi (yerel kopru): aiq_${evKey}`)
+    return true
+  }
 
   // 1) Cevabi uret
   let reply: string | null = null
@@ -126,12 +144,14 @@ export async function handleAiAssistant(ctx: {
       return true
     }
     console.log(`[v0] 🤖 AI yonetici cevap verdi → ${senderId}`)
-    const { data: conv } = await supabase
+    const { data: convRows } = await supabase
       .from("conversations")
       .select("id")
       .eq("user_id", user.id)
       .eq("recipient_id", String(senderId))
-      .single()
+      .order("created_at", { ascending: true })
+      .limit(1)
+    const conv = convRows?.[0]
     if (conv) {
       await supabase.from("messages").insert({
         id: `mid_ai_${Date.now()}_${Math.random()}`,

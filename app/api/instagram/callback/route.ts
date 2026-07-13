@@ -51,18 +51,23 @@ export async function POST(request: NextRequest) {
       body: tokenParams.toString(),
     })
 
-    const tokenData = await tokenRes.json()
+    // HASSASIYET: user_id ~1.78e16, Number.MAX_SAFE_INTEGER'i (9e15) asar —
+    // res.json() ile parse edilirse son basamak yuvarlanabilir (yanlis hesap ID'si!).
+    // Ham metinden regex ile string olarak cekiyoruz.
+    const tokenRaw = await tokenRes.text()
+    let tokenData: any = {}
+    try { tokenData = JSON.parse(tokenRaw) } catch {}
     if (!tokenRes.ok) {
       if (tokenData.error_message?.includes("authorization code has been used")) {
         // Harmless double-fire from React StrictMode or double clicks
         return NextResponse.json({ error: "Code already used" }, { status: 400 })
       }
-      console.error("[v0] 🔴 Token Error:", JSON.stringify(tokenData, null, 2))
+      console.error("[v0] 🔴 Token Error:", tokenRaw)
       return NextResponse.json({ error: tokenData.error_description || "Token failed" }, { status: 400 })
     }
 
     const shortToken = tokenData.access_token
-    const loginUserId = tokenData.user_id.toString()
+    const loginUserId = (/"user_id"\s*:\s*"?(\d+)"?/.exec(tokenRaw)?.[1] || String(tokenData.user_id))
 
     // 3. Exchange for Long Token (60 Days)
     // FIX (9 Tem): exchange basarisizsa ESKIDEN sessizce 1 saatlik kisa token
@@ -116,12 +121,16 @@ export async function POST(request: NextRequest) {
         const meRes = await fetch(
           `https://graph.instagram.com/v24.0/me?fields=user_id,username&access_token=${accessToken}`
         )
-        const meData = await meRes.json()
-        console.log(`[v0] 📋 /me response (deneme ${attempt}):`, JSON.stringify(meData))
+        // HASSASIYET: user_id 2^53'u asabilir — ham metinden string olarak cek
+        const meRaw = await meRes.text()
+        let meData: any = {}
+        try { meData = JSON.parse(meRaw) } catch {}
+        console.log(`[v0] 📋 /me response (deneme ${attempt}):`, meRaw)
 
         if (meData.username) username = meData.username
-        if (meData.user_id) {
-          businessAccountId = meData.user_id.toString()
+        const meUserId = /"user_id"\s*:\s*"?(\d+)"?/.exec(meRaw)?.[1]
+        if (meUserId) {
+          businessAccountId = meUserId
           identityOk = true
           console.log(`[v0] 🎯 IG Professional Account ID: ${businessAccountId}`)
           break

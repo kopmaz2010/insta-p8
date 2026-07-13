@@ -5,6 +5,18 @@ import { createReelsContainer, getContainerStatus, publishContainer, recordTrial
 // Helper to wait
 const delay = (ms: number) => new Promise(res => setTimeout(res, ms))
 
+// Polling ~2 dk surebilir; varsayilan fonksiyon suresi yetmez. Yarim kalan
+// kosu state'i guncelleyemeyince ayni klip TEKRAR yayinlanabiliyordu.
+export const maxDuration = 300
+
+// Saat penceresi Turkiye saatine gore (Vercel UTC calisir; getHours() UTC donerdi)
+function istanbulHM(): [number, number] {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Europe/Istanbul", hour: "2-digit", minute: "2-digit", hour12: false,
+    }).format(new Date()).split(":").map(Number)
+    return [parts[0], parts[1]]
+}
+
 export async function GET(request: NextRequest) {
     // Security check: In production, verify a "Cron-Secret" header
     // const authHeader = request.headers.get('authorization')
@@ -36,10 +48,8 @@ export async function GET(request: NextRequest) {
             const log = { user_id: config.user_id, status: 'skipped', reason: '' }
 
             try {
-                // 2. Validate Time Window
-                const now = new Date()
-                const currentHour = now.getHours()
-                const currentMinute = now.getMinutes()
+                // 2. Validate Time Window (Turkiye saati)
+                const [currentHour, currentMinute] = istanbulHM()
                 const currentTimeVal = currentHour * 60 + currentMinute
 
                 // Parse Window
@@ -62,16 +72,11 @@ export async function GET(request: NextRequest) {
 
                 if (!isInside) {
                     log.reason = `Outside window (${config.start_time}-${config.end_time})`
-                    // Calculate next valid time
-                    let nextValid = new Date()
-                    if (currentTimeVal > endTimeVal) {
-                        // Too late, move to tomorrow start
-                        nextValid.setDate(nextValid.getDate() + 1)
-                        nextValid.setHours(startH, startM, 0, 0)
-                    } else {
-                        // Too early, create date for today start
-                        nextValid.setHours(startH, startM, 0, 0)
-                    }
+                    // Sonraki pencere baslangicina kadar dakika farki (TZ'den bagimsiz)
+                    const deltaMin = currentTimeVal > endTimeVal
+                        ? (24 * 60 - currentTimeVal) + startTimeVal // yarin sabah
+                        : startTimeVal - currentTimeVal             // bugun pencere basi
+                    const nextValid = new Date(Date.now() + deltaMin * 60000)
 
                     await supabase
                         .from("scheduler_config")
@@ -124,6 +129,37 @@ export async function GET(request: NextRequest) {
                     // Push next_run forward to avoid spamming db
                     const nextTime = new Date(Date.now() + (config.interval_minutes * 60000))
                     await supabase.from("scheduler_config").update({ next_run_at: nextTime.toISOString() }).eq("user_id", config.user_id)
+                    results.push(log); continue;
+                }
+
+                // ATOMIK CLAIM: yayina baslamadan ONCE next_run_at ilerletilir
+                // (CAS: ayni next_run_at'i goren ikinci kosu 0 satir gunceller ve cikar).
+                // Boylece es zamanli iki tetik ayni klibi iki kez yayinlayamaz.
+                const claimNextRun = new Date(Date.now() + (config.interval_minutes * 60000))
+                const { data: claimed } = await supabase
+                    .from("scheduler_config")
+                    .update({ next_run_at: claimNextRun.toISOString() })
+                    .eq("user_id", config.user_id)
+                    .eq("next_run_at", config.next_run_at)
+                    .select("user_id")
+                if (!claimed?.length) {
+                    log.reason = 'Baska kosu isliyor (claim alinamadi)'
+                    results.push(log); continue;
+                }
+
+                // TEKRAR-PAYLASIM KORUMASI: ayni video bu hesapta zaten yayinlandiysa atla
+                const { data: dupe } = await supabase
+                    .from("reels_posts")
+                    .select("id")
+                    .eq("user_id", config.user_id)
+                    .eq("video_url", clip.video_url)
+                    .in("status", ["PUBLISHED", "success"])
+                    .limit(1)
+                if (dupe?.length) {
+                    log.reason = `Clip #${clip.sequence_index} zaten yayinlanmis, atlandi`
+                    await supabase.from("scheduler_config").update({
+                        current_sequence_index: clip.sequence_index + 1,
+                    }).eq("user_id", config.user_id)
                     results.push(log); continue;
                 }
 

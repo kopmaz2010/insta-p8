@@ -31,19 +31,17 @@ export async function POST(request: NextRequest) {
 
         const supabase = await getSupabaseServerClient()
 
-        // Calculate initial next_run if enabling
-        // For simplicity, just set next_run to NOW() so it triggers immediately, 
-        // or keep existing logic.
-        const updates = {
-            is_running,
-            interval_minutes,
-            start_time,
-            end_time,
-            post_as_trial: post_as_trial === true,
-            trial_strategy: trial_strategy === "MANUAL" ? "MANUAL" : "SS_PERFORMANCE",
-            mark_as_ai: mark_as_ai === true,
-            updated_at: new Date().toISOString()
-        }
+        // KISMI GUNCELLEME: yalnizca gonderilen alanlar yazilir. Onceden eksik
+        // alanlar false'a zorlaniyordu — tek alan degistiren bir cagri
+        // mark_as_ai/post_as_trial bayraklarini sessizce sifirliyordu.
+        const updates: any = { updated_at: new Date().toISOString() }
+        if ("is_running" in body) updates.is_running = is_running
+        if ("interval_minutes" in body) updates.interval_minutes = interval_minutes
+        if ("start_time" in body) updates.start_time = start_time
+        if ("end_time" in body) updates.end_time = end_time
+        if ("post_as_trial" in body) updates.post_as_trial = post_as_trial === true
+        if ("trial_strategy" in body) updates.trial_strategy = trial_strategy === "MANUAL" ? "MANUAL" : "SS_PERFORMANCE"
+        if ("mark_as_ai" in body) updates.mark_as_ai = mark_as_ai === true
 
         const { data, error } = await supabase
             .from("scheduler_config")

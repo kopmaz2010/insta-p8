@@ -119,6 +119,22 @@ export async function isOptedOut(supabase: any, userId: any, igsid: any): Promis
   return m?.opted_out === true
 }
 
+// Gunluk gonderim limiti (webhook'takiyle ayni mantik — gamification ici
+// gonderimler de ayni tavana tabidir)
+const DAILY_DM_LIMIT_G = Number(process.env.DAILY_DM_LIMIT || 150)
+export async function underDailyLimitG(supabase: any, userId: any): Promise<boolean> {
+  const dayStart = new Date()
+  dayStart.setUTCHours(0, 0, 0, 0)
+  const { count, error } = await supabase
+    .from("webhook_events")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .like("event_type", "send%")
+    .gte("processed_at", dayStart.toISOString())
+  if (error) return false // FAIL-CLOSED
+  return (count || 0) < DAILY_DM_LIMIT_G
+}
+
 // POLITIKA: saatlik gonderim tavani (Faz 1 gunluk limitin saatlik esi)
 export async function underHourlyLimit(supabase: any, userId: any): Promise<boolean> {
   const hourAgo = new Date(Date.now() - 3600_000).toISOString()
@@ -130,7 +146,7 @@ export async function underHourlyLimit(supabase: any, userId: any): Promise<bool
     .gte("processed_at", hourAgo)
   if (error) {
     console.error("[v0] saatlik limit kontrol hatasi:", error)
-    return true
+    return false // FAIL-CLOSED: limit dogrulanamiyorsa gonderme
   }
   return (count || 0) < HOURLY_DM_LIMIT
 }
@@ -167,7 +183,7 @@ export async function rateLimitCoolingDown(supabase: any, userId: any): Promise<
     .eq("user_id", userId)
     .eq("event_type", "flag_rate")
     .gte("processed_at", since)
-  if (error) return false
+  if (error) return true // FAIL-CLOSED: devre kesici okunamiyorsa sogutmada say
   return (count || 0) > 0
 }
 
@@ -358,6 +374,7 @@ export async function awardReactionPoints(ctx: { supabase: any; user: any; sende
     console.log(`[v0] ⭐ +${pts} ifade puani: ${member.username || senderId}`)
     // Gunun ilk ifadesine kisa tesekkur — limitler + devre kesici gozetilir
     if (
+      (await underDailyLimitG(supabase, user.id)) &&
       (await underHourlyLimit(supabase, user.id)) &&
       !(await rateLimitCoolingDown(supabase, user.id))
     ) {
@@ -534,6 +551,20 @@ export async function handleGamificationDM(ctx: {
     return true
   }
 
+  // 2.5) KALICI-ETKI KORUMASI: puan dusuren/stok azaltan aksiyonlar, cevap
+  // gonderilemeyecekse HIC calismasin (eskiden odul dusuluyor ama limit
+  // yuzunden kod DM'i gitmiyordu — uye puanini kaybedip odulu alamiyordu)
+  if (["redeem", "quiz_answer", "ref_code_entry"].includes(action || "")) {
+    if (
+      !(await underDailyLimit(supabase, user.id)) ||
+      !(await underHourlyLimit(supabase, user.id)) ||
+      (await rateLimitCoolingDown(supabase, user.id))
+    ) {
+      console.log(`[v0] 🛑 Limit/sogutma nedeniyle '${action}' islenmedi (mutasyon yapilmadi)`)
+      return true
+    }
+  }
+
   // 3) Cevap mesajini kur
   let message: any = null
   const pn = settings.program_name || "Fabrika Puan"
@@ -619,6 +650,7 @@ export async function handleGamificationDM(ctx: {
       .select("*")
       .eq("id", quizId)
       .eq("user_id", user.id)
+      .eq("active", true) // pasif soruya eski quick-reply'dan cevap verilemesin
       .single()
     if (!quiz || !Number.isInteger(quizChoice) || quizChoice < 0 || quizChoice >= quiz.options.length) {
       message = { text: `Bu soru artık geçerli değil. Devam etmek için "QUIZ" yaz. 🧠` }
@@ -718,10 +750,18 @@ export async function handleGamificationDM(ctx: {
       const ptsIn = await insertBucket(supabase, member, settings.pts_ref_invitee, "referral", `pt_ref_in_${member.id}`, settings)
       const ptsOut = await insertBucket(supabase, inviter, settings.pts_ref_inviter, "referral", `pt_ref_out_${member.id}`, settings)
       message = { text: `🎉 Kod geçerli! +${ptsIn} puan kazandın!\n\nBakiyen için "PUAN" yaz. ⭐` }
-      // Davet edeni bilgilendirmeyi DENE — 24s penceresi kapaliysa gitmez, puan yine de islenmistir
-      if (ptsOut > 0 && !inviter.opted_out) {
+      // Davet edeni bilgilendirmeyi DENE — 24s penceresi kapaliysa gitmez, puan yine de islenmistir.
+      // Bu da bir giden DM: limitler + devre kesici + dedup zincirinden gecer.
+      if (
+        ptsOut > 0 &&
+        !inviter.opted_out &&
+        (await underDailyLimitG(supabase, user.id)) &&
+        (await underHourlyLimit(supabase, user.id)) &&
+        !(await rateLimitCoolingDown(supabase, user.id)) &&
+        (await claimEvent(supabase, `send_refnotif_${member.id}`, "send_dm", user.id))
+      ) {
         try {
-          await fetch(`${GRAPH}/me/messages?access_token=${encodeURIComponent(user.access_token)}`, {
+          const nres = await fetch(`${GRAPH}/me/messages?access_token=${encodeURIComponent(user.access_token)}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -729,6 +769,8 @@ export async function handleGamificationDM(ctx: {
               message: { text: `🤝 Davet ettiğin kişi katıldı: +${ptsOut} puan kazandın! "PUAN" yazarak bakiyeni görebilirsin. ⭐` },
             }),
           })
+          const nj = await nres.json()
+          if (nj.error) await recordRateLimitHit(supabase, user.id, nj.error)
         } catch {}
       }
     }
