@@ -15,13 +15,26 @@ import { Loader2, Upload, UserX, Heart, Users, Download, ExternalLink } from "lu
 
 type Person = { username: string; href: string }
 
+function usernameFromHref(href?: string): string {
+  if (!href) return ""
+  // https://www.instagram.com/_u/USERNAME  veya  .../USERNAME
+  const m = href.replace(/\/+$/, "").match(/instagram\.com\/(?:_u\/)?([^/?]+)/i)
+  return m ? decodeURIComponent(m[1]) : ""
+}
+
 function extractUsernames(json: any, key?: string): Person[] {
   // followers_1.json = top-level array; following.json = { relationships_following: [...] }
   const arr = Array.isArray(json) ? json : json?.[key || "relationships_following"] || []
   const out: Person[] = []
+  const seen = new Set<string>()
   for (const item of arr) {
     const d = item?.string_list_data?.[0]
-    if (d?.value) out.push({ username: d.value, href: d.href || `https://instagram.com/${d.value}` })
+    // KRITIK: following.json'da d.value YOK — username item.title'da veya href'te.
+    // followers'da value var. Uc kaynagi da dene.
+    const username = (d?.value || item?.title || usernameFromHref(d?.href)).trim()
+    if (!username || seen.has(username.toLowerCase())) continue
+    seen.add(username.toLowerCase())
+    out.push({ username, href: d?.href || `https://instagram.com/${username}` })
   }
   return out
 }
@@ -41,34 +54,43 @@ export function FollowerExport() {
       const JSZip = (await import("jszip")).default
       const zip = await JSZip.loadAsync(file)
 
-      const followerFiles: string[] = []
-      let followingFile = ""
+      // ICERIK-TABANLI siniflandirma — dosya adina degil JSON yapisina bak.
+      // Boylece Instagram ad/klasor degistirse de calisir. Aday json'lari topla.
+      const jsonPaths: string[] = []
       zip.forEach((path) => {
-        // KRITIK: klasor adi "followers_and_following" oldugu icin TAM YOL
-        // her iki kelimeyi de icerir. Yalniz DOSYA ADINA bak.
         const base = path.split("/").pop()?.toLowerCase() || ""
-        if (!base.endsWith(".json")) return
-        // followers_1.json, followers_2.json ... (birden fazla parca olabilir)
-        if (/^followers(_\d+)?\.json$/.test(base)) followerFiles.push(path)
-        // yalniz following.json (pending/recent/requests degil)
-        else if (base === "following.json") followingFile = path
+        if (base.endsWith(".json")) jsonPaths.push(path)
       })
 
-      if (followerFiles.length === 0 && !followingFile) {
-        throw new Error(
-          "ZIP içinde followers/following bulunamadı. İndirirken FORMAT = JSON seçtiğinden emin ol (HTML değil).",
-        )
+      let followers: Person[] = []
+      let following: Person[] = []
+      for (const path of jsonPaths) {
+        const base = path.split("/").pop()?.toLowerCase() || ""
+        // istenmeyen listeleri atla (pending/recent/requests/close_friends/blocked...)
+        if (/(pending|recent|request|removed|suggest|blocked|restricted|close_friends|custom_lists|unfollowed|hashtag)/.test(base))
+          continue
+        let j: any
+        try {
+          j = JSON.parse(await zip.file(path).async("string"))
+        } catch {
+          continue
+        }
+        // FOLLOWING: relationships_following anahtarli (ad ne olursa olsun)
+        if (j && !Array.isArray(j) && Array.isArray(j.relationships_following)) {
+          following = following.concat(extractUsernames(j, "relationships_following"))
+        }
+        // FOLLOWERS: relationships_followers anahtarli VEYA followers_N.json (top-level array)
+        else if (j && !Array.isArray(j) && Array.isArray(j.relationships_followers)) {
+          followers = followers.concat(extractUsernames(j, "relationships_followers"))
+        } else if (Array.isArray(j) && /^followers(_\d+)?\.json$/.test(base)) {
+          followers = followers.concat(extractUsernames(j))
+        }
       }
 
-      let followers: Person[] = []
-      for (const f of followerFiles) {
-        const j = JSON.parse(await zip.file(f).async("string"))
-        followers = followers.concat(extractUsernames(j))
-      }
-      let following: Person[] = []
-      if (followingFile) {
-        const j = JSON.parse(await zip.file(followingFile).async("string"))
-        following = extractUsernames(j, "relationships_following")
+      if (followers.length === 0 && following.length === 0) {
+        throw new Error(
+          "ZIP içinde takipçi/takip verisi bulunamadı. İndirirken FORMAT = JSON (HTML değil) ve 'Takipçiler ve takip edilenler' seçili olmalı.",
+        )
       }
 
       const followerSet = new Set(followers.map((p) => p.username.toLowerCase()))
