@@ -94,10 +94,12 @@ async function claimEvent(supabase: any, key: string, type: string, userId: any)
   if (!error) return true
   if (error.code === "23505") return false // zaten islenmis
   console.error("[v0] claimEvent hatasi:", error)
-  // FAIL-CLOSED: dedup dogrulanamiyorsa GONDERME. (Eskiden true donuyordu —
-  // Supabase kesintisinde dedup+limitler ayni anda kayboluyor, Meta retry'lari
-  // sinirsiz cift DM uretebiliyordu.)
-  return false
+  // Beklenmedik DB hatasi:
+  //  - GELEN event (recv_*): FAIL-OPEN → mesaji isle. Aksi halde gecici bir DB
+  //    hatasi kullanicinin mesajini SESSIZCE yutar ("quiz yazdim, hicbir sey olmadi").
+  //    Cift cevap riski yok: her giden DM'in kendi send_* claim'i var, o fail-closed.
+  //  - GIDEN claim (send_*): FAIL-CLOSED → gonderme. Dedup dogrulanamiyorsa cift DM riski alma.
+  return type.startsWith("recv")
 }
 
 // FAZ1: hesap basina gunluk gonderim limiti

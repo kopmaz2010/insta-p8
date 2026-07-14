@@ -64,22 +64,42 @@ export function GamificationManager() {
       .finally(() => setLoading(false))
   }, [])
 
-  const saveSettings = async (extra?: any) => {
+  // DB'ye yaz + YAZILANI GERİ OKU (ekranda gordugun = DB'deki. "acik sandim ama kapaliymis" biter)
+  const persist = async (next: any) => {
     setSaving(true)
     try {
       const res = await fetch("/api/gamification/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, settings, ...(extra || {}) }),
+        body: JSON.stringify({ userId, settings: next }),
       })
       if (!res.ok) throw new Error()
-      toast.success("Kaydedildi ✅")
+      const fresh = await fetch(`/api/gamification/settings?userId=${userId}`).then((r) => r.json())
+      if (fresh?.settings) setSettings(fresh.settings)
+      return true
     } catch {
-      toast.error("Kaydedilemedi")
+      toast.error("Kaydedilemedi — değişiklik uygulanmadı")
+      return false
     } finally {
       setSaving(false)
     }
   }
+
+  const saveSettings = async () => {
+    if (await persist(settings)) toast.success("Kaydedildi ✅")
+  }
+
+  // Anahtarlar ANINDA kaydedilir (Kaydet'e basmayi bekleme — eski hata buydu).
+  // Basarisizsa DB'den gelen gercek deger geri yazilir, anahtar yalan soylemez.
+  const toggleField = async (key: string, v: boolean) => {
+    const next = { ...settings, [key]: v }
+    setSettings(next) // iyimser
+    const ok = await persist(next)
+    if (ok) toast.success(v ? "Açıldı ✅" : "Kapatıldı")
+  }
+
+  // "QUIZ" yazinca soru gidebilmesi icin en az 1 AKTIF soru sart
+  const activeQuizCount = quizzes.filter((q: any) => q.active !== false).length
 
   if (loading)
     return (
@@ -127,8 +147,41 @@ export function GamificationManager() {
               </div>
               <Switch
                 checked={settings?.active === true}
-                onCheckedChange={(v) => setSettings({ ...settings, active: v })}
+                disabled={saving}
+                onCheckedChange={(v) => toggleField("active", v)}
               />
+            </div>
+
+            {/* DURUM SERIDI: DB'nin gercegi. "quiz yaziyorum baslamiyor" teshisi burada gorulur. */}
+            <div
+              className={`rounded-xl border px-4 py-3 mb-4 text-xs ${
+                settings?.active === true
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                  : "border-red-500/30 bg-red-500/10 text-red-200"
+              }`}
+            >
+              {settings?.active === true ? (
+                <>
+                  <strong>Sistem AÇIK</strong> — komutlar cevaplanıyor.{" "}
+                  {settings?.quiz_enabled === true ? (
+                    activeQuizCount > 0 ? (
+                      <>Quiz AÇIK · <strong>{activeQuizCount} aktif soru</strong> · DM'e “QUIZ” yazınca başlar.</>
+                    ) : (
+                      <span className="text-amber-300">
+                        Quiz açık ama <strong>aktif soru YOK</strong> → “QUIZ” yazana soru gitmez. Quiz Soruları
+                        sekmesinden soru ekle/aktifleştir.
+                      </span>
+                    )
+                  ) : (
+                    <span className="text-amber-300">Quiz KAPALI → “QUIZ” yazana soru gitmez.</span>
+                  )}
+                </>
+              ) : (
+                <>
+                  <strong>Sistem KAPALI</strong> — “QUIZ”, “PUAN”, “ÖDÜLLER” yazana <strong>hiç cevap gitmez</strong>,
+                  puan verilmez. Oyunun başlaması için yukarıdaki anahtarı aç.
+                </>
+              )}
             </div>
             <div className="mb-4">
               <label className={labelCls}>Program adı</label>
@@ -171,14 +224,20 @@ export function GamificationManager() {
                   <span className="text-sm text-neutral-300">{f.label}</span>
                   <Switch
                     checked={settings?.[f.key] === true}
-                    onCheckedChange={(v) => setSettings({ ...settings, [f.key]: v })}
+                    disabled={saving}
+                    onCheckedChange={(v) => toggleField(f.key, v)}
                   />
                 </div>
               ))}
             </div>
-            <Button onClick={() => saveSettings()} disabled={saving} className="mt-5">
-              {saving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Save className="w-4 h-4 mr-1" />} Kaydet
-            </Button>
+            <div className="flex items-center gap-3 mt-5">
+              <Button onClick={() => saveSettings()} disabled={saving}>
+                {saving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Save className="w-4 h-4 mr-1" />} Kaydet
+              </Button>
+              <span className="text-[11px] text-neutral-500">
+                Anahtarlar anında kaydedilir. “Kaydet” yalnızca yukarıdaki <strong>sayı/metin</strong> alanları için.
+              </span>
+            </div>
           </div>
         </TabsContent>
 
