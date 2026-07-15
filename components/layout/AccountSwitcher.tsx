@@ -18,6 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { ChevronsUpDown, Plus, Check, AlertTriangle, Instagram } from "lucide-react"
+import { instagramOAuthUrl } from "@/components/layout/landing-page"
 
 interface Account {
   id: string
@@ -85,7 +86,10 @@ export function AccountSwitcher() {
         ))}
         <DropdownMenuSeparator className="bg-white/10" />
         <DropdownMenuItem
-          onClick={() => (window.location.href = "/")}
+          // FIX: eskiden "/"a gidiyordu; ana sayfa localStorage'daki oturumu gorup
+          // /dashboard'a GERI atiyordu — OAuth hic acilmiyordu (sonsuz dongu).
+          // Artik dogrudan Instagram yetkilendirmesine gider.
+          onClick={() => (window.location.href = instagramOAuthUrl())}
           className="flex items-center gap-2 cursor-pointer text-neutral-300 focus:bg-white/10 focus:text-white"
         >
           <Plus className="w-3.5 h-3.5" /> Yeni hesap bağla
