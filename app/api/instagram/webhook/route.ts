@@ -50,22 +50,8 @@ function validSignature(rawBody: string, header: string | null): boolean {
 // HIC eslesmiyordu (iki kelimeli "Yetenek Takası" bug'inin koku buydu).
 // Unicode lookaround (?<!\p{L}\p{N}) ... (?!\p{L}\p{N}) ile duzeltildi.
 // ============================================================
-function normalizeTr(s: string): string {
-  return (s || "").toLocaleLowerCase("tr").normalize("NFC")
-}
-function keywordMatches(text: string, triggerValue: string): boolean {
-  const t = normalizeTr(text)
-  return (triggerValue || "").split(",").some((k: string) => {
-    const kw = normalizeTr(k.trim())
-    if (!kw) return false
-    const esc = kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    try {
-      return new RegExp(`(?<![\\p{L}\\p{N}])${esc}(?![\\p{L}\\p{N}])`, "u").test(t)
-    } catch {
-      return t.includes(kw)
-    }
-  })
-}
+// keywordMatches lib/tr-match'e tasindi — comment-poller ile TEK KAYNAK
+import { keywordMatches } from "@/lib/tr-match"
 
 // Hesap basina mesaj ozellestirmesi: public cevap varyasyonlari (maks 5)
 // + takip kapisi karti metin/butonlari (dashboard > Özelleştirme'den yonetilir)
