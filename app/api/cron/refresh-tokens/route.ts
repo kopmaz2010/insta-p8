@@ -69,6 +69,37 @@ export async function GET(request: Request) {
     }
   }
 
+  // OTO-ONARIM: webhook aboneligi dusmus hesaplari yeniden abone et.
+  // (fabrika_muzik/hayranimsinapp vakalari: abonelik sessizce eksilirse
+  // otomasyon "sebepsiz" olur. Gunluk cron kendini onarir + bildirir.)
+  let resubscribed = 0
+  const subProblems: string[] = []
+  for (const u of users || []) {
+    if (!u.access_token) continue
+    try {
+      const sub = await fetch(
+        `https://graph.instagram.com/v23.0/me/subscribed_apps?access_token=${encodeURIComponent(u.access_token)}`,
+      ).then((r) => r.json())
+      const fields = sub?.data?.[0]?.subscribed_fields || []
+      if (!fields.includes("comments") || !fields.includes("messages")) {
+        const fix = await fetch(
+          `https://graph.instagram.com/v23.0/me/subscribed_apps?subscribed_fields=comments,messages&access_token=${encodeURIComponent(u.access_token)}`,
+          { method: "POST" },
+        ).then((r) => r.json())
+        if (fix?.success) {
+          resubscribed++
+          console.log(`[cron] 🔧 Webhook aboneligi onarildi: ${u.username}`)
+        } else {
+          subProblems.push(u.username)
+          console.error(`[cron] 🔴 Abonelik onarilamadi (${u.username}):`, JSON.stringify(fix))
+        }
+      }
+    } catch (e) {
+      subProblems.push(u.username)
+      console.error(`[cron] 🔴 Abonelik kontrolu hatasi (${u.username}):`, e)
+    }
+  }
+
   // MADDE 6 (10-ACIK): 30 gunden eski webhook_events kayitlarini temizle —
   // tablo sismesi her mesajda calisan limit sorgularini yavaslatiyordu.
   // (dedup anahtarlari gunluk/saatlik; 30 gun fazlasiyla guvenli)
@@ -87,11 +118,16 @@ export async function GET(request: Request) {
 
   // MADDE 4 (10-ACIK): sonuc bildirimi — TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID
   // env'leri ekliyse hata/yenileme durumunda Telegram'a mesaj atar (sessiz olum yok)
-  const summary = `🔑 InstaAuto token cron: ${refreshed} yenilendi, ${skipped} atlandı, ${failed} HATA${purged ? ` · 🧹 ${purged} eski event temizlendi` : ""}`
-  if (failed > 0 || refreshed > 0) await notifyTelegram(failed > 0 ? `⚠️ ${summary}` : summary)
+  const summary =
+    `🔑 InstaAuto token cron: ${refreshed} yenilendi, ${skipped} atlandı, ${failed} HATA` +
+    `${purged ? ` · 🧹 ${purged} eski event temizlendi` : ""}` +
+    `${resubscribed ? ` · 🔧 ${resubscribed} webhook aboneliği onarıldı` : ""}` +
+    `${subProblems.length ? ` · 🔴 abonelik sorunu: ${subProblems.join(",")}` : ""}`
+  if (failed > 0 || refreshed > 0 || resubscribed > 0 || subProblems.length > 0)
+    await notifyTelegram(failed > 0 || subProblems.length > 0 ? `⚠️ ${summary}` : summary)
 
-  console.log(`[cron] token refresh bitti: ${refreshed} yenilendi, ${skipped} atlandi, ${failed} hata, ${purged} event temizlendi`)
-  return NextResponse.json({ ok: true, refreshed, skipped, failed, purged })
+  console.log(`[cron] token refresh bitti: ${refreshed} yenilendi, ${skipped} atlandi, ${failed} hata, ${purged} event temizlendi, ${resubscribed} abonelik onarildi`)
+  return NextResponse.json({ ok: true, refreshed, skipped, failed, purged, resubscribed, subProblems })
 }
 
 async function notifyTelegram(text: string) {
