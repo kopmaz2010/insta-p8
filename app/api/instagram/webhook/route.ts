@@ -269,6 +269,11 @@ export async function POST(request: NextRequest) {
 
             const mediaId = change.value.media.id
 
+            // IZLEME: Meta'dan yorum eventi GELDI mi sorusuna DB'den cevap —
+            // self-comment dahil her yorum icin iz birakilir ("hic event yok mu,
+            // yoksa kod mu atliyor" ayrimi loglara bakmadan yapilabilir).
+            await claimEvent(supabase, `raw_comment_${commentId}`, "recv_comment_raw", user.id)
+
             // Safety check for self-reply
             if (senderId === webhookId || senderId === user.business_account_id || senderId === user.page_id) continue
 
