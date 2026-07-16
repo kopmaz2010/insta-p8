@@ -4,6 +4,7 @@
 
 import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
+import { requireOwner } from "@/lib/app-auth"
 
 function validateQuiz(q: any) {
   if (!q.question || typeof q.question !== "string" || !q.question.trim()) return "Soru metni boş olamaz"
@@ -20,6 +21,8 @@ export async function GET(request: NextRequest) {
     const userId = request.nextUrl.searchParams.get("userId")
     if (!userId) return NextResponse.json({ error: "Missing userId" }, { status: 400 })
     const supabase = await getSupabaseServerClient()
+    const own = await requireOwner(supabase, request, userId)
+    if (!own.ok) return NextResponse.json({ error: own.error }, { status: own.status })
     const { data, error } = await supabase
       .from("quizzes")
       .select("*")
@@ -41,6 +44,8 @@ export async function POST(request: NextRequest) {
     const invalid = validateQuiz(body)
     if (invalid) return NextResponse.json({ error: invalid }, { status: 400 })
     const supabase = await getSupabaseServerClient()
+    const own = await requireOwner(supabase, request, userId)
+    if (!own.ok) return NextResponse.json({ error: own.error }, { status: own.status })
     const { data, error } = await supabase
       .from("quizzes")
       .insert({
@@ -68,6 +73,8 @@ export async function PUT(request: NextRequest) {
     const invalid = validateQuiz(body)
     if (invalid) return NextResponse.json({ error: invalid }, { status: 400 })
     const supabase = await getSupabaseServerClient()
+    const own = await requireOwner(supabase, request, userId)
+    if (!own.ok) return NextResponse.json({ error: own.error }, { status: own.status })
     const { data, error } = await supabase
       .from("quizzes")
       .update({
@@ -94,6 +101,8 @@ export async function DELETE(request: NextRequest) {
     const id = request.nextUrl.searchParams.get("id")
     if (!userId || !id) return NextResponse.json({ error: "Missing userId/id" }, { status: 400 })
     const supabase = await getSupabaseServerClient()
+    const own = await requireOwner(supabase, request, userId)
+    if (!own.ok) return NextResponse.json({ error: own.error }, { status: own.status })
     const { error } = await supabase.from("quizzes").delete().eq("id", id).eq("user_id", userId)
     if (error) throw error
     return NextResponse.json({ success: true })

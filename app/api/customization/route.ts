@@ -5,6 +5,7 @@
 
 import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
+import { requireOwner } from "@/lib/app-auth"
 
 const DEFAULTS = {
   public_replies: ["DM'ne bak! 📩", "Gönderdim, DM'ni kontrol et! 🔥", "DM kutuna düştü! ✨"],
@@ -19,6 +20,8 @@ export async function GET(request: NextRequest) {
     const userId = request.nextUrl.searchParams.get("userId")
     if (!userId) return NextResponse.json({ error: "Missing userId" }, { status: 400 })
     const supabase = await getSupabaseServerClient()
+    const own = await requireOwner(supabase, request, userId)
+    if (!own.ok) return NextResponse.json({ error: own.error }, { status: own.status })
     const { data } = await supabase.from("dm_customization").select("*").eq("user_id", userId).single()
     return NextResponse.json(data || { user_id: userId, ...DEFAULTS })
   } catch (error) {
@@ -47,6 +50,8 @@ export async function PUT(request: NextRequest) {
     }
 
     const supabase = await getSupabaseServerClient()
+    const own = await requireOwner(supabase, request, userId)
+    if (!own.ok) return NextResponse.json({ error: own.error }, { status: own.status })
     const { data, error } = await supabase
       .from("dm_customization")
       .upsert(

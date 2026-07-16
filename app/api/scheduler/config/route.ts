@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
+import { requireOwner } from "@/lib/app-auth"
 
 export async function GET(request: NextRequest) {
     try {
@@ -8,6 +9,8 @@ export async function GET(request: NextRequest) {
         if (!userId) return NextResponse.json({ error: "Missing userId" }, { status: 400 })
 
         const supabase = await getSupabaseServerClient()
+        const own = await requireOwner(supabase, request, userId)
+        if (!own.ok) return NextResponse.json({ error: own.error }, { status: own.status })
 
         const { data, error } = await supabase
             .from("scheduler_config")
@@ -30,6 +33,8 @@ export async function POST(request: NextRequest) {
         if (!userId) return NextResponse.json({ error: "Missing userId" }, { status: 400 })
 
         const supabase = await getSupabaseServerClient()
+        const own = await requireOwner(supabase, request, userId)
+        if (!own.ok) return NextResponse.json({ error: own.error }, { status: own.status })
 
         // KISMI GUNCELLEME: yalnizca gonderilen alanlar yazilir. Onceden eksik
         // alanlar false'a zorlaniyordu — tek alan degistiren bir cagri

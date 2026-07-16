@@ -11,6 +11,7 @@
 
 import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
+import { requireOwner } from "@/lib/app-auth"
 
 const GRAPH = "https://graph.instagram.com/v24.0"
 
@@ -19,6 +20,8 @@ export async function GET(request: NextRequest) {
     const userId = request.nextUrl.searchParams.get("userId")
     if (!userId) return NextResponse.json({ error: "Missing userId" }, { status: 400 })
     const supabase = await getSupabaseServerClient()
+    const own = await requireOwner(supabase, request, userId)
+    if (!own.ok) return NextResponse.json({ error: own.error }, { status: own.status })
 
     const { data: user } = await supabase.from("users").select("access_token, username").eq("id", userId).single()
     if (!user?.access_token) return NextResponse.json({ error: "Hesap/token yok" }, { status: 404 })

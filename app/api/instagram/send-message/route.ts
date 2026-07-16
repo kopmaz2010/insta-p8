@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createServerClient } from "@supabase/ssr"
+import { requireOwner } from "@/lib/app-auth"
 
 /**
  * POST /api/instagram/send-message
@@ -23,6 +24,9 @@ export async function POST(request: NextRequest) {
     const supabase = createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
       cookies: {},
     })
+
+    const own = await requireOwner(supabase, request, user_id)
+    if (!own.ok) return NextResponse.json({ error: own.error }, { status: own.status })
 
     // Get user's access token
     const { data: user, error: userError } = await supabase

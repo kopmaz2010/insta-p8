@@ -36,7 +36,18 @@ export function AccountSwitcher() {
     setActiveName(localStorage.getItem("ig_username") || "Hesap seç")
     fetch("/api/accounts")
       .then((r) => (r.ok ? r.json() : []))
-      .then((list) => Array.isArray(list) && setAccounts(list))
+      .then((list) => {
+        if (!Array.isArray(list)) return
+        setAccounts(list)
+        // secili hesap bu kullaniciya ait degilse (veya hic secim yoksa)
+        // ilk kendi hesabina gec — yoksa paneller 403 alir ve bos gorunur
+        const stored = localStorage.getItem("ig_user_id")
+        if (list.length && !list.some((a: Account) => a.id === stored)) {
+          localStorage.setItem("ig_user_id", list[0].id)
+          localStorage.setItem("ig_username", list[0].username)
+          window.location.reload()
+        }
+      })
       .catch(() => {})
   }, [])
 

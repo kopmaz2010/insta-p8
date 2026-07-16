@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
+import { requireOwner } from "@/lib/app-auth"
 
 export async function GET(request: NextRequest) {
     try {
@@ -8,6 +9,8 @@ export async function GET(request: NextRequest) {
         if (!userId) return NextResponse.json({ error: "Missing userId" }, { status: 400 })
 
         const supabase = await getSupabaseServerClient()
+        const own = await requireOwner(supabase, request, userId)
+        if (!own.ok) return NextResponse.json({ error: own.error }, { status: own.status })
 
         // Fetch items ordered by sequence
         const { data, error } = await supabase
@@ -33,6 +36,8 @@ export async function POST(request: NextRequest) {
         if (!userId || !video_url) return NextResponse.json({ error: "Missing fields" }, { status: 400 })
 
         const supabase = await getSupabaseServerClient()
+        const own = await requireOwner(supabase, request, userId)
+        if (!own.ok) return NextResponse.json({ error: own.error }, { status: own.status })
 
         // Get current max sequence
         const { data: maxContent } = await supabase
@@ -73,6 +78,17 @@ export async function DELETE(request: NextRequest) {
         if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 })
 
         const supabase = await getSupabaseServerClient()
+
+        // SAHIPLIK: silinecek havuz ogesi bu oturumun hesabina mi ait?
+        // (users.id BIGINT — JS yuvarlanmasin diye ::text ile cekilir)
+        const { data: row } = await supabase
+            .from("content_pool")
+            .select("user_id_s:user_id::text")
+            .eq("id", id)
+            .single()
+        if (!row) return NextResponse.json({ error: "Kayit bulunamadi" }, { status: 404 })
+        const own = await requireOwner(supabase, request, row.user_id_s)
+        if (!own.ok) return NextResponse.json({ error: own.error }, { status: own.status })
 
         const { error } = await supabase
             .from("content_pool")

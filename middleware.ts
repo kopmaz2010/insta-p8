@@ -1,11 +1,13 @@
 /* @ts-nocheck */
 
 // ============================================================
-// MADDE 1 (10-ACIK): PANEL API KORUMASI
-// ADMIN_PASSWORD env'i tanimliysa tum panel API'leri imzali cookie ister
-// (/giris sayfasindan sifreyle alinir). Env tanimli DEGILSE eski davranis
-// surer (kurulum bozulmaz) — handoff'ta uyari var.
+// PANEL API KORUMASI — COK KULLANICILI
+// Tum panel API'leri ia_sess (accountId.exp.HMAC) cookie'si ister.
+// Kod girisi /giris sayfasindan yapilir (app_accounts + scrypt).
+// Imza sirri API_SECRET_KEY — hooks'la ayni env. Env YOKSA eski acik
+// davranis surer (kurulum bozulmaz) ama canli ortamda env tanimli.
 // Webhook/OAuth/cron/hooks kendi mekanizmalariyla korundugu icin muaf.
+// Sahiplik (hangi hesap kimin) kontrolu route icinde requireOwner ile.
 // ============================================================
 
 import { NextResponse } from "next/server"
@@ -13,34 +15,41 @@ import type { NextRequest } from "next/server"
 
 const PUBLIC_PREFIXES = [
   "/api/instagram/webhook",  // Meta imza dogrulamasi kendi icinde
-  "/api/instagram/callback", // OAuth donusu
+  "/api/instagram/callback", // OAuth donusu (owner atamasi route icinde cookie'den)
   "/api/cron/",              // Vercel cron + GitHub Actions (opsiyonel CRON_SECRET)
   "/api/hooks/",             // x-api-secret ile korunuyor
   "/api/chatbot/bridge",     // x-api-secret ile korunuyor (yerel kopru)
   "/api/auth/login",         // giris ucu
+  "/api/auth/logout",
 ]
 
-async function hasValidCookie(req: NextRequest, secret: string): Promise<boolean> {
-  const raw = req.cookies.get("ia_auth")?.value
+// Tam-eslesme muafiyeti: /api/scheduler dis cron ile tetiklenir (GET, deterministik).
+// startsWith KULLANILMAZ — /api/scheduler/config ve /pool panel API'sidir, korunur.
+const PUBLIC_EXACT = ["/api/scheduler"]
+
+async function hasValidSession(req: NextRequest, secret: string): Promise<boolean> {
+  const raw = req.cookies.get("ia_sess")?.value
   if (!raw) return false
-  const [exp, sig] = raw.split(".")
-  if (!exp || !sig) return false
-  if (Number(exp) < Date.now()) return false
+  const parts = raw.split(".")
+  if (parts.length !== 3) return false
+  const [id, exp, sig] = parts
+  if (!id || !exp || !sig || Number(exp) < Date.now()) return false
   const enc = new TextEncoder()
   const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
-  const mac = await crypto.subtle.sign("HMAC", key, enc.encode(exp))
+  const mac = await crypto.subtle.sign("HMAC", key, enc.encode(`${id}.${exp}`))
   const hex = Array.from(new Uint8Array(mac)).map((b) => b.toString(16).padStart(2, "0")).join("")
   return hex === sig
 }
 
 export async function middleware(req: NextRequest) {
-  const pwd = process.env.ADMIN_PASSWORD
-  if (!pwd) return NextResponse.next() // koruma kurulmamis
+  const secret = process.env.API_SECRET_KEY
+  if (!secret) return NextResponse.next() // koruma kurulmamis (yalnizca yerel gelistirme)
 
   const { pathname } = req.nextUrl
   if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) return NextResponse.next()
+  if (PUBLIC_EXACT.includes(pathname)) return NextResponse.next()
 
-  if (await hasValidCookie(req, pwd)) return NextResponse.next()
+  if (await hasValidSession(req, secret)) return NextResponse.next()
   return NextResponse.json({ error: "unauthorized — /giris sayfasindan oturum acin" }, { status: 401 })
 }
 

@@ -4,12 +4,15 @@
 
 import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
+import { requireOwner } from "@/lib/app-auth"
 
 export async function GET(request: NextRequest) {
   try {
     const userId = request.nextUrl.searchParams.get("userId")
     if (!userId) return NextResponse.json({ error: "Missing userId" }, { status: 400 })
     const supabase = await getSupabaseServerClient()
+    const own = await requireOwner(supabase, request, userId)
+    if (!own.ok) return NextResponse.json({ error: own.error }, { status: own.status })
     const { data, error } = await supabase
       .from("rewards")
       .select("*")
@@ -31,6 +34,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Başlık ve pozitif puan bedeli gerekli" }, { status: 400 })
     }
     const supabase = await getSupabaseServerClient()
+    const own = await requireOwner(supabase, request, userId)
+    if (!own.ok) return NextResponse.json({ error: own.error }, { status: own.status })
     const { data, error } = await supabase
       .from("rewards")
       .insert({
@@ -60,6 +65,8 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: "Eksik/geçersiz alanlar" }, { status: 400 })
     }
     const supabase = await getSupabaseServerClient()
+    const own = await requireOwner(supabase, request, userId)
+    if (!own.ok) return NextResponse.json({ error: own.error }, { status: own.status })
     const { data, error } = await supabase
       .from("rewards")
       .update({
@@ -88,6 +95,8 @@ export async function DELETE(request: NextRequest) {
     const id = request.nextUrl.searchParams.get("id")
     if (!userId || !id) return NextResponse.json({ error: "Missing userId/id" }, { status: 400 })
     const supabase = await getSupabaseServerClient()
+    const own = await requireOwner(supabase, request, userId)
+    if (!own.ok) return NextResponse.json({ error: own.error }, { status: own.status })
     // redemptions FK'si nedeniyle silinemiyorsa pasife cek
     const { error } = await supabase.from("rewards").delete().eq("id", id).eq("user_id", userId)
     if (error) {

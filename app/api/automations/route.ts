@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
+import { requireOwner } from "@/lib/app-auth"
 
 export async function GET(request: NextRequest) {
   try {
@@ -7,6 +8,8 @@ export async function GET(request: NextRequest) {
     if (!userId) return NextResponse.json({ error: "Missing userId" }, { status: 400 })
 
     const supabase = await getSupabaseServerClient()
+    const own = await requireOwner(supabase, request, userId)
+    if (!own.ok) return NextResponse.json({ error: own.error }, { status: own.status })
 
     // STABLE FIX: Fetch rules by the Login ID (userId) directly.
     // We stop caring about the shifting Business ID here.
@@ -38,6 +41,8 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = await getSupabaseServerClient()
+    const own = await requireOwner(supabase, request, userId)
+    if (!own.ok) return NextResponse.json({ error: own.error }, { status: own.status })
 
     // OZEL DEGERLER (ALL/ALL_REACTIONS/ALL_MENTIONS) kucultulmez — webhook
     // bunlari buyuk harf bekler; kucultulunce reaction kurallari hic ateslenmiyordu.
@@ -80,6 +85,15 @@ export async function DELETE(request: NextRequest) {
     const id = request.nextUrl.searchParams.get("id")
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 })
     const supabase = await getSupabaseServerClient()
+    // SAHIPLIK: silinecek kural bu oturumun hesabina mi ait? (BIGINT → ::text)
+    const { data: row } = await supabase
+      .from("automations")
+      .select("user_id_s:user_id::text")
+      .eq("id", id)
+      .single()
+    if (!row) return NextResponse.json({ error: "Kayit bulunamadi" }, { status: 404 })
+    const own = await requireOwner(supabase, request, row.user_id_s)
+    if (!own.ok) return NextResponse.json({ error: own.error }, { status: own.status })
     const { error } = await supabase.from("automations").delete().eq("id", id)
     if (error) throw error
     return NextResponse.json({ success: true })
@@ -103,6 +117,15 @@ export async function PUT(request: NextRequest) {
     }
 
     const supabase = await getSupabaseServerClient()
+    // SAHIPLIK: guncellenecek kural bu oturumun hesabina mi ait? (BIGINT → ::text)
+    const { data: row } = await supabase
+      .from("automations")
+      .select("user_id_s:user_id::text")
+      .eq("id", id)
+      .single()
+    if (!row) return NextResponse.json({ error: "Kayit bulunamadi" }, { status: 404 })
+    const own = await requireOwner(supabase, request, row.user_id_s)
+    if (!own.ok) return NextResponse.json({ error: own.error }, { status: own.status })
 
     const SPECIAL_TRIGGERS = new Set(["ALL", "ALL_REACTIONS", "ALL_MENTIONS"])
     const normTrigger = (v: string) =>

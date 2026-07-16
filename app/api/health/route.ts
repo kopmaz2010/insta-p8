@@ -9,12 +9,17 @@
 
 import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
+import { getSessionAccount, ownerFilterId } from "@/lib/app-auth"
 
 export const maxDuration = 60
 
-export async function GET() {
+export async function GET(request: Request) {
   const supabase = await getSupabaseServerClient()
-  const { data: users } = await supabase.from("users").select("id::text, username, business_account_id, access_token")
+  const session = await getSessionAccount(supabase, request)
+  let q = supabase.from("users").select("id::text, username, business_account_id, access_token")
+  const ownerId = ownerFilterId(session)
+  if (ownerId) q = q.eq("owner_id", ownerId) // herkes yalnizca kendi hesaplarinin sagligini gorur
+  const { data: users } = await q
 
   const out: any[] = []
   for (const u of users || []) {

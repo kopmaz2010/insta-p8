@@ -76,9 +76,11 @@ export function useInstagramSession() {
         localStorage.removeItem("ig_user_id")
         localStorage.removeItem("ig_username")
         document.cookie = "insta_session=; Max-Age=0; path=/;"
+        // panel oturumunu da kapat (ia_sess httpOnly — sunucudan silinir)
+        fetch("/api/auth/logout", { method: "POST" }).catch(() => {})
         setUsername(null)
         setUserId(null)
-        router.push("/")
+        router.push("/giris")
     }
 
     return { userId, username, isLoading, logout }

@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
+import { requireOwner } from "@/lib/app-auth"
 
 export async function POST(request: NextRequest) {
     try {
@@ -11,6 +12,8 @@ export async function POST(request: NextRequest) {
         }
 
         const supabase = await getSupabaseServerClient()
+        const own = await requireOwner(supabase, request, userId)
+        if (!own.ok) return NextResponse.json({ error: own.error }, { status: own.status })
 
         // 1. Get User Access Token
         const { data: user, error: userError } = await supabase

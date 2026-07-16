@@ -150,7 +150,7 @@ export async function POST(request: NextRequest) {
     // kazasinin ikinci yarisi buydu.
     const { data: existing } = await supabase
       .from("users")
-      .select("username, business_account_id")
+      .select("username, business_account_id, owner_id")
       .eq("id", loginUserId)
       .single()
 
@@ -172,6 +172,13 @@ export async function POST(request: NextRequest) {
       business_account_id: businessAccountId,
       page_id: businessAccountId, // Always keep in sync
     }
+
+    // SAHIPLIK: hesabi baglayan panel oturumuna yaz. Var olan hesabin sahibi
+    // DEGISTIRILMEZ (baskasinin hesabini kendi uzerine alamasin); yalnizca
+    // sahipsiz/yeni hesap oturum sahibine baglanir.
+    const { getSessionAccount } = await import("@/lib/app-auth")
+    const session = await getSessionAccount(supabase, request)
+    if (session && !existing?.owner_id) updates.owner_id = session.id
 
     console.log(`[v0] 💾 Saving user: ${username} | id=${loginUserId} | biz_id=${businessAccountId}`)
 

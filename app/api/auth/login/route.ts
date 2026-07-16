@@ -1,43 +1,58 @@
 /* @ts-nocheck */
 
-// Panel girisi: ADMIN_PASSWORD dogruysa 7 gunluk imzali httpOnly cookie verir.
+// COK KULLANICILI GIRIS
+// POST {code}: erisim kodu app_accounts hash'leriyle dogrulanir → ia_sess cookie.
 // GET: oturum durumu — dashboard layout'u bununla /giris yonlendirmesi yapar.
+// Kod duz metin SAKLANMAZ; yalnizca scrypt hash karsilastirilir.
 
 import { NextResponse } from "next/server"
-import crypto from "crypto"
+import { getSupabaseServerClient } from "@/lib/supabase-server"
+import { verifyCode, signSession, getSessionAccount, SESSION_COOKIE } from "@/lib/app-auth"
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 export async function GET(request: Request) {
-  const pwd = process.env.ADMIN_PASSWORD
-  if (!pwd) return NextResponse.json({ protected: false, authenticated: true })
-  const cookieHeader = request.headers.get("cookie") || ""
-  const raw = cookieHeader.split(";").map((c) => c.trim()).find((c) => c.startsWith("ia_auth="))?.slice(8)
-  let authenticated = false
-  if (raw) {
-    const [exp, sig] = raw.split(".")
-    if (exp && sig && Number(exp) > Date.now()) {
-      const expected = crypto.createHmac("sha256", pwd).update(exp).digest("hex")
-      authenticated = sig === expected
-    }
-  }
-  return NextResponse.json({ protected: true, authenticated })
+  if (!process.env.API_SECRET_KEY) return NextResponse.json({ protected: false, authenticated: true })
+  const supabase = await getSupabaseServerClient()
+  const account = await getSessionAccount(supabase, request)
+  return NextResponse.json({
+    protected: true,
+    authenticated: Boolean(account),
+    name: account?.name || null,
+    isAdmin: Boolean(account?.is_admin),
+    mustChange: Boolean(account?.must_change),
+  })
 }
 
 export async function POST(request: Request) {
-  const pwd = process.env.ADMIN_PASSWORD
-  if (!pwd) {
-    return NextResponse.json({ ok: true, note: "ADMIN_PASSWORD tanimli degil — koruma kapali" })
+  if (!process.env.API_SECRET_KEY) {
+    return NextResponse.json({ ok: true, note: "API_SECRET_KEY tanimli degil — koruma kapali" })
   }
-  const { password } = await request.json().catch(() => ({}))
-  if (!password || password !== pwd) {
-    return NextResponse.json({ error: "Şifre hatalı" }, { status: 401 })
+  const { code } = await request.json().catch(() => ({}))
+  if (!code || typeof code !== "string" || code.length < 4) {
+    return NextResponse.json({ error: "Kod hatalı" }, { status: 401 })
   }
-  const exp = String(Date.now() + 7 * 86400000)
-  const sig = crypto.createHmac("sha256", pwd).update(exp).digest("hex")
-  const res = NextResponse.json({ ok: true })
-  res.cookies.set("ia_auth", `${exp}.${sig}`, {
+
+  const supabase = await getSupabaseServerClient()
+  const { data: accounts, error } = await supabase
+    .from("app_accounts")
+    .select("id, name, is_admin, must_change, code_hash")
+  if (error) return NextResponse.json({ error: "Sunucu hatası" }, { status: 500 })
+
+  const match = (accounts || []).find((a: any) => verifyCode(code, a.code_hash))
+  if (!match) {
+    await sleep(400) // kaba-kuvvet yavaslatma
+    return NextResponse.json({ error: "Kod hatalı" }, { status: 401 })
+  }
+
+  const res = NextResponse.json({
+    ok: true,
+    name: match.name,
+    isAdmin: Boolean(match.is_admin),
+    mustChange: Boolean(match.must_change),
+  })
+  res.cookies.set(SESSION_COOKIE, signSession(String(match.id)), {
     httpOnly: true,
-    // localhost/LAN (http) erisiminde Secure cookie dusuyor ve giris donguye
-    // giriyordu — callback'teki insta_session ile ayni kosul kullanilir
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",

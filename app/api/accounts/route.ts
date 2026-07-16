@@ -1,18 +1,28 @@
 /* @ts-nocheck */
 
-// Bagli tum Instagram hesaplarini listeler (hesap degistirici icin).
-// Middleware korumasi altinda (panel sifresi) — token DONDURMEZ, yalnizca kimlik+saglik.
+// Bagli Instagram hesaplarini listeler (hesap degistirici icin).
+// SAHIPLIK: yalnizca oturumdaki kullanicinin hesaplari doner (admin: hepsi).
+// Token DONDURMEZ, yalnizca kimlik+saglik.
 
 import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
+import { getSessionAccount, ownerFilterId } from "@/lib/app-auth"
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const supabase = await getSupabaseServerClient()
-    const { data, error } = await supabase
+    const session = await getSessionAccount(supabase, request)
+    if (process.env.API_SECRET_KEY && !session) {
+      return NextResponse.json({ error: "oturum yok" }, { status: 401 })
+    }
+
+    let q = supabase
       .from("users")
-      .select("id::text, username, business_account_id, token_expires_at, updated_at")
+      .select("id::text, username, business_account_id, token_expires_at, updated_at, owner_id")
       .order("username", { ascending: true })
+    const ownerId = ownerFilterId(session)
+    if (ownerId) q = q.eq("owner_id", ownerId)
+    const { data, error } = await q
     if (error) throw error
 
     const accounts = (data || []).map((u: any) => ({
