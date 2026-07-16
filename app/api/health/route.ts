@@ -14,7 +14,7 @@ export const maxDuration = 60
 
 export async function GET() {
   const supabase = await getSupabaseServerClient()
-  const { data: users } = await supabase.from("users").select("id, username, business_account_id, access_token")
+  const { data: users } = await supabase.from("users").select("id::text, username, business_account_id, access_token")
 
   const out: any[] = []
   for (const u of users || []) {

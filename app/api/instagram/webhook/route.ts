@@ -149,9 +149,12 @@ export async function POST(request: NextRequest) {
       const webhookId = entry.id
 
       // 1. DUAL ID LOOKUP
+      // id_s: users.id BIGINT'i 2^53'u asar — JSON number'a cevrilirken YUVARLANIR
+      // (hayranimsinapp ...486 vakasi: automations sorgusu 0 donuyordu). id her
+      // zaman ::text olarak da cekilir ve asagida user.id'ye yazilir.
       let { data: user } = await supabase
         .from("users")
-        .select("*")
+        .select("*, id_s:id::text")
         .or(`business_account_id.eq.${webhookId},page_id.eq.${webhookId}`)
         .single()
 
@@ -178,7 +181,7 @@ export async function POST(request: NextRequest) {
           if (candidateId === webhookId) continue
           const { data: fallbackUser } = await supabase
             .from("users")
-            .select("*")
+            .select("*, id_s:id::text")
             .or(`business_account_id.eq.${candidateId},page_id.eq.${candidateId}`)
             .single()
 
@@ -197,7 +200,7 @@ export async function POST(request: NextRequest) {
       // ============================================================
       if (!user) {
         console.log(`[v0] 🔎 Trying token verification for ${webhookId}...`)
-        const { data: allUsers } = await supabase.from("users").select("*")
+        const { data: allUsers } = await supabase.from("users").select("*, id_s:id::text")
 
         if (allUsers) {
           for (const candidate of allUsers) {
@@ -233,6 +236,8 @@ export async function POST(request: NextRequest) {
         console.log(`[v0] ❌ Could not resolve User for ID ${webhookId}`)
         continue
       }
+      // BIGINT hassasiyet fix'i: sorgularda kullanilacak id = kayipsiz text
+      if (user.id_s) user.id = user.id_s
 
       const { data: automations } = await supabase
         .from("automations")

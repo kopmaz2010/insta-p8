@@ -23,7 +23,7 @@ export async function GET() {
   const supabase = await getSupabaseServerClient()
   const { data: due } = await supabase
     .from("scheduled_posts")
-    .select("*")
+    .select("*, user_id_s:user_id::text")
     .in("status", ["pending", "processing", "publishing"])
     .lte("scheduled_at", new Date().toISOString())
     .order("scheduled_at", { ascending: true })
@@ -31,6 +31,7 @@ export async function GET() {
 
   const results: any[] = []
   for (const post of due || []) {
+    if (post.user_id_s) post.user_id = post.user_id_s // BIGINT yuvarlanma fix'i
     const log: any = { id: post.id, video: (post.video_url || "").split("/").pop() }
     try {
       const { data: user } = await supabase.from("users").select("*").eq("id", post.user_id).single()

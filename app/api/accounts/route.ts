@@ -11,7 +11,7 @@ export async function GET() {
     const supabase = await getSupabaseServerClient()
     const { data, error } = await supabase
       .from("users")
-      .select("id, username, business_account_id, token_expires_at, updated_at")
+      .select("id::text, username, business_account_id, token_expires_at, updated_at")
       .order("username", { ascending: true })
     if (error) throw error
 

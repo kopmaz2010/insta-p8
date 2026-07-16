@@ -42,11 +42,14 @@ export async function GET(request: Request) {
   }
 
   const supabase = await getSupabaseServerClient()
-  const { data: users } = await supabase.from("users").select("*")
+  // id::text: BIGINT id'ler JS number'da yuvarlanabiliyor (2^53 asimi) —
+  // hayranimsinapp bu yuzden gorunmez olmustu
+  const { data: users } = await supabase.from("users").select("*, id_s:id::text")
   const results: any[] = []
 
   for (const user of users || []) {
     if (!user.access_token) continue
+    if (user.id_s) user.id = user.id_s
     const { data: automations } = await supabase
       .from("automations")
       .select("*")

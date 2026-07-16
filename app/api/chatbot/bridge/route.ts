@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
 
   const { data: events } = await supabase
     .from("webhook_events")
-    .select("event_key, user_id, processed_at")
+    .select("event_key, user_id::text, processed_at")
     .eq("event_type", "ai_pending")
     .gte("processed_at", cutoff)
     .order("processed_at", { ascending: true })
@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
 
   const { data: ev } = await supabase
     .from("webhook_events")
-    .select("event_key, event_type, user_id, processed_at")
+    .select("event_key, event_type, user_id::text, processed_at")
     .eq("event_key", key)
     .single()
   if (!ev) return NextResponse.json({ error: "not found" }, { status: 404 })
@@ -136,6 +136,7 @@ export async function POST(request: NextRequest) {
   }
 
   const { data: user } = await supabase.from("users").select("*").eq("id", ev.user_id).single()
+  if (user) user.id = ev.user_id // BIGINT yuvarlanma fix'i
   if (!user?.access_token) return NextResponse.json({ error: "hesap/token yok" }, { status: 404 })
 
   // limitler + devre kesici (her giden DM icin zorunlu)
