@@ -80,6 +80,7 @@ export async function GET(request: Request) {
     }
 
     let handled = 0
+    const debug: any[] = [] // ?debug=1 ile her yorumun karari doner
     for (const media of mediaList) {
       let comments: any[] = []
       try {
@@ -92,16 +93,17 @@ export async function GET(request: Request) {
       }
 
       for (const c of comments) {
-        if (!c?.text || !c?.id) continue
+        const D = (karar: string) => debug.push({ cid: c?.id, from: c?.from?.username, karar })
+        if (!c?.text || !c?.id) { D("bos"); continue }
         const senderId = c?.from?.id
         // pencere disi (eski) yorumlar
-        if (c.timestamp && Date.now() - new Date(c.timestamp).getTime() > COMMENT_WINDOW_H * 3600_000) continue
+        if (c.timestamp && Date.now() - new Date(c.timestamp).getTime() > COMMENT_WINDOW_H * 3600_000) { D("pencere-disi"); continue }
 
         // izleme: webhook'la ayni raw anahtari (cift kayit olmaz)
         await claim(supabase, `raw_comment_${c.id}`, "recv_comment_poll", user.id)
 
         // self-comment atla
-        if (!senderId || senderId === user.business_account_id || senderId === user.page_id) continue
+        if (!senderId || senderId === user.business_account_id || senderId === user.page_id) { D("self"); continue }
 
         const text = (c.text || "").toLocaleLowerCase("tr").trim()
         // eslesme onceligi webhook'la ayni: reply_all(spesifik) > keyword(spesifik) > keyword(global)
@@ -115,14 +117,15 @@ export async function GET(request: Request) {
           match = commentAutos.find(
             (a: any) => !a.specific_media_id && a.trigger_type === "keyword" && keywordMatches(text, a.trigger_value),
           )
-        if (!match) continue
+        if (!match) { D("eslesme-yok"); continue }
 
         const content = typeof match.response_content === "string" ? JSON.parse(match.response_content) : match.response_content
         // takip-kapili / kartli kurallar webhook ister — poller karisamaz
-        if (content?.check_follow || (!content?.message && content?.card)) continue
+        if (content?.check_follow || (!content?.message && content?.card)) { D("gate/kart-kurali"); continue }
 
         // dedup: webhook'la AYNI anahtar — kim once islerse digeri susar
-        if (!(await claim(supabase, `comment_${c.id}`, "recv_comment", user.id))) continue
+        if (!(await claim(supabase, `comment_${c.id}`, "recv_comment", user.id))) { D("dedup"); continue }
+        D("cevaplanacak")
 
         // limitler + devre kesici
         if (!(await underDailyLimitG(supabase, user.id))) break
@@ -170,7 +173,9 @@ export async function GET(request: Request) {
         }
       }
     }
-    results.push({ user: user.username, status: "ok", handled })
+    const row: any = { user: user.username, status: "ok", handled }
+    if (new URL(request.url).searchParams.get("debug") === "1") row.debug = debug
+    results.push(row)
   }
 
   return NextResponse.json({ ok: true, results })
