@@ -6,7 +6,7 @@
 
 import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
-import { getSessionAccount, verifyCode, hashCode } from "@/lib/app-auth"
+import { getSessionAccount, verifyCode, hashCode, signSession, SESSION_COOKIE } from "@/lib/app-auth"
 
 export async function POST(request: Request) {
   const supabase = await getSupabaseServerClient()
@@ -24,11 +24,23 @@ export async function POST(request: Request) {
   const clash = (all || []).find((a: any) => String(a.id) !== String(account.id) && verifyCode(code, a.code_hash))
   if (clash) return NextResponse.json({ error: "Bu kod kullanılamaz, farklı bir kod seçin" }, { status: 409 })
 
-  const { error: upErr } = await supabase
+  // sess_ver++ : kod degisince onceki tum oturumlar (calinmis cookie dahil)
+  // gecersiz olur. Bu istegi yapan kendi oturumuna yeni ver'li cookie verilir.
+  const { data: updated, error: upErr } = await supabase
     .from("app_accounts")
-    .update({ code_hash: hashCode(code), must_change: false })
+    .update({ code_hash: hashCode(code), must_change: false, sess_ver: (account.sess_ver ?? 0) + 1 })
     .eq("id", account.id)
+    .select("id, sess_ver")
+    .single()
   if (upErr) return NextResponse.json({ error: "Kaydedilemedi" }, { status: 500 })
 
-  return NextResponse.json({ ok: true })
+  const res = NextResponse.json({ ok: true })
+  res.cookies.set(SESSION_COOKIE, signSession(String(account.id), updated?.sess_ver ?? 1), {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: 7 * 86400,
+  })
+  return res
 }

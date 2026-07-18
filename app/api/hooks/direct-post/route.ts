@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
 import { createReelsContainer, getContainerStatus, publishContainer, recordTrialPost, underTrialQuota } from "@/lib/instagram-publishing"
+import { checkApiSecret } from "@/lib/app-auth"
 
 // Vercel: Allow up to 60s execution
 export const maxDuration = 60
@@ -18,9 +19,8 @@ const delay = (ms: number) => new Promise(res => setTimeout(res, ms))
  */
 export async function POST(request: NextRequest) {
     try {
-        // 1. Auth
-        const apiSecret = request.headers.get("x-api-secret")
-        if (apiSecret !== process.env.API_SECRET_KEY) {
+        // 1. Auth (sabit-zamanli)
+        if (!checkApiSecret(request.headers.get("x-api-secret"))) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
         }
 

@@ -1,6 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
 import { createReelsContainer, getContainerStatus, publishContainer, recordTrialPost, underTrialQuota } from "@/lib/instagram-publishing"
+import { checkCronSecret } from "@/lib/cron-auth"
+import { getSessionAccount } from "@/lib/app-auth"
 
 // Helper to wait
 const delay = (ms: number) => new Promise(res => setTimeout(res, ms))
@@ -18,16 +20,22 @@ function istanbulHM(): [number, number] {
 }
 
 export async function GET(request: NextRequest) {
-    // Security check: In production, verify a "Cron-Secret" header
-    // const authHeader = request.headers.get('authorization')
-    // if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // CRON kimligi (CRON_SECRET tanimliysa zorunlu, degilse geriye-uyumlu acik)
+    const cron = checkCronSecret(request)
+    if (!cron.ok) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
     const supabase = await getSupabaseServerClient()
     const results = []
 
     try {
         // 1. Get Due Schedules
-        const force = request.nextUrl.searchParams.get("force") === "true"
+        let force = request.nextUrl.searchParams.get("force") === "true"
+        // force = zaman kapisini (next_run_at) atlar → anonim istismari onle:
+        // yalnizca gecerli panel oturumu VEYA cron secret ile izin ver.
+        if (force && !cron.configured) {
+            const session = await getSessionAccount(supabase, request)
+            if (!session) force = false // yetkisiz force yok sayilir (deterministik akisa duser)
+        }
 
         let query = supabase
             .from("scheduler_config")

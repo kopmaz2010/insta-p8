@@ -15,11 +15,13 @@
 import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
 import { createReelsContainer, getContainerStatus, publishContainer } from "@/lib/instagram-publishing"
+import { checkCronSecret } from "@/lib/cron-auth"
 
 export const maxDuration = 60
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-export async function GET() {
+export async function GET(request: Request) {
+  if (!checkCronSecret(request).ok) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   const supabase = await getSupabaseServerClient()
   const { data: due } = await supabase
     .from("scheduled_posts")

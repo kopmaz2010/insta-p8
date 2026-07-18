@@ -19,6 +19,7 @@ import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
 import { keywordMatches } from "@/lib/tr-match"
 import { rateLimitCoolingDown, recordRateLimitHit, underHourlyLimit, underDailyLimitG } from "@/lib/gamification"
+import { checkCronSecret } from "@/lib/cron-auth"
 
 export const maxDuration = 60
 const GRAPH = "https://graph.instagram.com/v24.0"
@@ -36,10 +37,7 @@ async function claim(supabase: any, key: string, type: string, userId: any): Pro
 }
 
 export async function GET(request: Request) {
-  const auth = request.headers.get("authorization")
-  if (process.env.CRON_SECRET && auth !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 })
-  }
+  if (!checkCronSecret(request).ok) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const supabase = await getSupabaseServerClient()
   // id::text: BIGINT id'ler JS number'da yuvarlanabiliyor (2^53 asimi) —

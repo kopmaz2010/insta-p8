@@ -15,14 +15,14 @@ import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
 import { getAiSettings } from "@/lib/ai-assistant"
 import { rateLimitCoolingDown, recordRateLimitHit, underHourlyLimit } from "@/lib/gamification"
+import { checkApiSecret } from "@/lib/app-auth"
 
 const GRAPH = "https://graph.instagram.com/v24.0"
 const WINDOW_HOURS = 20
 const DAILY_DM_LIMIT = Number(process.env.DAILY_DM_LIMIT || 150)
 
 function authorized(request: NextRequest): boolean {
-  const s = process.env.API_SECRET_KEY
-  return Boolean(s) && request.headers.get("x-api-secret") === s
+  return checkApiSecret(request.headers.get("x-api-secret"))
 }
 
 async function underDailyLimit(supabase: any, userId: any): Promise<boolean> {

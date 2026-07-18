@@ -27,23 +27,43 @@ const PUBLIC_PREFIXES = [
 // startsWith KULLANILMAZ — /api/scheduler/config ve /pool panel API'sidir, korunur.
 const PUBLIC_EXACT = ["/api/scheduler"]
 
+// Middleware yalnizca imza+sure gecerliligini kontrol eder (hizli ilk kapi).
+// Oturum iptali/rotation (sess_ver) DB'ye bakan getSessionAccount'ta uygulanir;
+// tum veri erisimi oradan gectigi icin iptal edilmis oturum veri goremez.
 async function hasValidSession(req: NextRequest, secret: string): Promise<boolean> {
   const raw = req.cookies.get("ia_sess")?.value
   if (!raw) return false
   const parts = raw.split(".")
-  if (parts.length !== 3) return false
-  const [id, exp, sig] = parts
-  if (!id || !exp || !sig || Number(exp) < Date.now()) return false
+  if (parts.length !== 4) return false
+  const [id, exp, ver, sig] = parts
+  if (!id || !exp || !ver || !sig || Number(exp) < Date.now()) return false
   const enc = new TextEncoder()
   const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
-  const mac = await crypto.subtle.sign("HMAC", key, enc.encode(`${id}.${exp}`))
+  const mac = await crypto.subtle.sign("HMAC", key, enc.encode(`${id}.${exp}.${ver}`))
   const hex = Array.from(new Uint8Array(mac)).map((b) => b.toString(16).padStart(2, "0")).join("")
-  return hex === sig
+  return timingSafeEqualHex(hex, sig)
+}
+
+// Sabit-zamanli hex karsilastirma (Edge runtime — Node crypto yok).
+// Duz `===` erken cikar ve imza tahmininde zaman sizdirir.
+function timingSafeEqualHex(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
 }
 
 export async function middleware(req: NextRequest) {
   const secret = process.env.API_SECRET_KEY
-  if (!secret) return NextResponse.next() // koruma kurulmamis (yalnizca yerel gelistirme)
+  if (!secret) {
+    // PROD'da fail-CLOSED: secret yoksa (env kazasi) tum panel API'sini ac BIRAKMA
+    // — service_role RLS'i bypass ettigi icin acik kalirsa tum veri sizar.
+    // Yalnizca yerel gelistirmede (production degil) eski acik davranis surer.
+    if (process.env.NODE_ENV === "production") {
+      return NextResponse.json({ error: "server misconfigured" }, { status: 503 })
+    }
+    return NextResponse.next()
+  }
 
   const { pathname } = req.nextUrl
   if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) return NextResponse.next()

@@ -14,6 +14,18 @@ import crypto from "crypto"
 const SESSION_DAYS = 7
 export const SESSION_COOKIE = "ia_sess"
 
+// Paylasilan sir (x-api-secret) icin sabit-zamanli dogrulama.
+// Duz `header === process.env.X` erken cikar ve sir tahmininde zaman sizdirir.
+// Header eksik/uzunluk farkli olsa bile sabit is yapar.
+export function checkApiSecret(headerVal: string | null): boolean {
+  const expected = process.env.API_SECRET_KEY
+  if (!expected) return false // FAIL-CLOSED: sir tanimsizsa reddet
+  const a = Buffer.from(String(headerVal ?? ""))
+  const b = Buffer.from(expected)
+  if (a.length !== b.length) return false
+  return crypto.timingSafeEqual(a, b)
+}
+
 function secret(): string {
   return process.env.API_SECRET_KEY || ""
 }
@@ -33,13 +45,18 @@ export function verifyCode(code: string, stored: string): boolean {
 }
 
 // --- oturum imzasi ---
-export function signSession(accountId: string): string {
+// Format: accountId.exp.ver.HMAC(accountId.exp.ver). `ver` = app_accounts.sess_ver;
+// kod degisince (change-code) sess_ver artar → eski cookie'ler gecersiz olur
+// (oturum iptali/rotation — calinmis cookie kod degistirilerek dusurulebilir).
+export function signSession(accountId: string, ver: number | string = 0): string {
   const exp = String(Date.now() + SESSION_DAYS * 86400000)
-  const sig = crypto.createHmac("sha256", secret()).update(`${accountId}.${exp}`).digest("hex")
-  return `${accountId}.${exp}.${sig}`
+  const v = String(ver ?? 0)
+  const sig = crypto.createHmac("sha256", secret()).update(`${accountId}.${exp}.${v}`).digest("hex")
+  return `${accountId}.${exp}.${v}.${sig}`
 }
 
-export function readSessionId(cookieHeader: string): string | null {
+// Donus: { id, ver } veya null (imza/sure gecersiz).
+export function readSession(cookieHeader: string): { id: string; ver: string } | null {
   if (!secret()) return null
   const raw = (cookieHeader || "")
     .split(";")
@@ -48,28 +65,31 @@ export function readSessionId(cookieHeader: string): string | null {
     ?.slice(SESSION_COOKIE.length + 1)
   if (!raw) return null
   const parts = raw.split(".")
-  if (parts.length !== 3) return null
-  const [id, exp, sig] = parts
+  if (parts.length !== 4) return null
+  const [id, exp, ver, sig] = parts
   if (Number(exp) < Date.now()) return null
-  const expected = crypto.createHmac("sha256", secret()).update(`${id}.${exp}`).digest("hex")
+  const expected = crypto.createHmac("sha256", secret()).update(`${id}.${exp}.${ver}`).digest("hex")
   try {
     if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null
   } catch {
     return null
   }
-  return id
+  return { id, ver }
 }
 
 // Oturumdaki app_accounts kaydini getirir (yoksa null).
+// sess_ver eslesmezse (kod degistirilmis, eski cookie) FAIL-CLOSED → null.
 export async function getSessionAccount(supabase: any, request: Request): Promise<any | null> {
-  const id = readSessionId(request.headers.get("cookie") || "")
-  if (!id) return null
+  const s = readSession(request.headers.get("cookie") || "")
+  if (!s) return null
   const { data } = await supabase
     .from("app_accounts")
-    .select("id, name, is_admin, must_change")
-    .eq("id", id)
+    .select("id, name, is_admin, must_change, sess_ver")
+    .eq("id", s.id)
     .single()
-  return data || null
+  if (!data) return null
+  if (String(data.sess_ver ?? 0) !== String(s.ver)) return null // rotation: eski oturum
+  return data
 }
 
 // Panel API'leri icin sahiplik kapisi. igUserId (users.id) bu oturumun mu?

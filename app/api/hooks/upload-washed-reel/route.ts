@@ -1,11 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
+import { checkApiSecret } from "@/lib/app-auth"
 
 export async function POST(request: NextRequest) {
     try {
-        // 1. Security Check
-        const apiSecret = request.headers.get("x-api-secret")
-        if (apiSecret !== process.env.API_SECRET_KEY) {
+        // 1. Security Check (sabit-zamanli)
+        if (!checkApiSecret(request.headers.get("x-api-secret"))) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
         }
 

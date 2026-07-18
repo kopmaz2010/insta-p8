@@ -29,14 +29,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, note: "API_SECRET_KEY tanimli degil — koruma kapali" })
   }
   const { code } = await request.json().catch(() => ({}))
-  if (!code || typeof code !== "string" || code.length < 4) {
+  if (!code || typeof code !== "string" || code.length < 6) {
     return NextResponse.json({ error: "Kod hatalı" }, { status: 401 })
   }
 
   const supabase = await getSupabaseServerClient()
   const { data: accounts, error } = await supabase
     .from("app_accounts")
-    .select("id, name, is_admin, must_change, code_hash")
+    .select("id, name, is_admin, must_change, code_hash, sess_ver")
   if (error) return NextResponse.json({ error: "Sunucu hatası" }, { status: 500 })
 
   const match = (accounts || []).find((a: any) => verifyCode(code, a.code_hash))
@@ -51,7 +51,7 @@ export async function POST(request: Request) {
     isAdmin: Boolean(match.is_admin),
     mustChange: Boolean(match.must_change),
   })
-  res.cookies.set(SESSION_COOKIE, signSession(String(match.id)), {
+  res.cookies.set(SESSION_COOKIE, signSession(String(match.id), match.sess_ver ?? 0), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",

@@ -33,14 +33,30 @@ const DAILY_DM_LIMIT = Number(process.env.DAILY_DM_LIMIT || 1000)
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 // FAZ1-A4: Meta webhook imzasini dogrula (x-hub-signature-256)
+// FAIL-CLOSED: secret yoksa REDDET (eski hali `return true` idi — imza
+// dogrulamasi olmadan webhook'un tetiklenmesine izin veriyordu, boylece
+// asagidaki `.or()` filtresine internetten deger enjekte edilebiliyordu).
+// Prod'da INSTAGRAM_APP_SECRET set (canli test: imzasiz POST 403 aliyor).
 function validSignature(rawBody: string, header: string | null): boolean {
   const secret = process.env.INSTAGRAM_APP_SECRET
-  if (!secret) return true // env eksikse kurulumu bozma
+  if (!secret) {
+    console.error("[webhook] INSTAGRAM_APP_SECRET tanimsiz — imza dogrulanamiyor, reddedildi")
+    return false
+  }
   if (!header) return false
   const expected = "sha256=" + crypto.createHmac("sha256", secret).update(rawBody).digest("hex")
   const a = Buffer.from(header)
   const b = Buffer.from(expected)
   return a.length === b.length && crypto.timingSafeEqual(a, b)
+}
+
+// PostgREST filtre enjeksiyonu savunmasi: Instagram ID'leri yalnizca rakamdir.
+// `.or("col.eq." + id)` template'ine gomulen id virgul/nokta/parantez icerirse
+// filtre mantigi kaydirilabilir (baska hesabin satirina eslesme). Rakam-disi
+// her degeri reddet — imza fail-open olsa bile bagimsiz ikinci savunma.
+function numericId(v: any): string | null {
+  const s = String(v ?? "")
+  return /^\d{1,25}$/.test(s) ? s : null
 }
 
 // ============================================================
@@ -147,6 +163,11 @@ export async function POST(request: NextRequest) {
       // ============================================================
 
       const webhookId = entry.id
+      const webhookIdSafe = numericId(webhookId)
+      if (!webhookIdSafe) {
+        console.warn(`[v0] ⚠️ Rakam-disi entry.id atlandi: ${String(webhookId).slice(0, 40)}`)
+        continue
+      }
 
       // 1. DUAL ID LOOKUP
       // id_s: users.id BIGINT'i 2^53'u asar — JSON number'a cevrilirken YUVARLANIR
@@ -155,7 +176,7 @@ export async function POST(request: NextRequest) {
       let { data: user } = await supabase
         .from("users")
         .select("*, id_s:id::text")
-        .or(`business_account_id.eq.${webhookId},page_id.eq.${webhookId}`)
+        .or(`business_account_id.eq.${webhookIdSafe},page_id.eq.${webhookIdSafe}`)
         .single()
 
       // ============================================================
@@ -179,10 +200,12 @@ export async function POST(request: NextRequest) {
 
         for (const candidateId of candidateIds) {
           if (candidateId === webhookId) continue
+          const candSafe = numericId(candidateId)
+          if (!candSafe) continue // rakam-disi payload id enjeksiyonu reddet
           const { data: fallbackUser } = await supabase
             .from("users")
             .select("*, id_s:id::text")
-            .or(`business_account_id.eq.${candidateId},page_id.eq.${candidateId}`)
+            .or(`business_account_id.eq.${candSafe},page_id.eq.${candSafe}`)
             .single()
 
           if (fallbackUser) {

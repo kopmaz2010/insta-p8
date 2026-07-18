@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
 import { requireOwner } from "@/lib/app-auth"
+import { safeMediaFetch } from "@/lib/safe-fetch"
 
 export async function POST(request: NextRequest) {
     try {
@@ -15,9 +16,9 @@ export async function POST(request: NextRequest) {
         const own = await requireOwner(supabase, request, userId)
         if (!own.ok) return NextResponse.json({ error: own.error }, { status: own.status })
 
-        // 1. Download the Video from external URL (Instagram CDN)
+        // 1. Download the Video from external URL (yalnizca Instagram/FB CDN — SSRF savunmasi)
         console.log(`[Import] Downloading video: ${videoUrl}`)
-        const vidRes = await fetch(videoUrl)
+        const vidRes = await safeMediaFetch(videoUrl)
         if (!vidRes.ok) throw new Error("Failed to fetch video from remote URL")
 
         const videoBlob = await vidRes.blob()

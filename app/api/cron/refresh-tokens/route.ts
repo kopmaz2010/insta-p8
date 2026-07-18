@@ -6,17 +6,15 @@
 
 import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
+import { checkCronSecret } from "@/lib/cron-auth"
 
 export const maxDuration = 60
 
 const REFRESH_THRESHOLD_DAYS = 15
 
 export async function GET(request: Request) {
-  // Vercel Cron, CRON_SECRET env varsa Authorization: Bearer <secret> gonderir
-  const auth = request.headers.get("authorization")
-  if (process.env.CRON_SECRET && auth !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 })
-  }
+  // Vercel Cron, CRON_SECRET env varsa Authorization: Bearer <secret> gonderir (sabit-zamanli)
+  if (!checkCronSecret(request).ok) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const supabase = await getSupabaseServerClient()
   const { data: users, error } = await supabase
