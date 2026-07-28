@@ -6,6 +6,10 @@
 // tablosu) — tekil zamanlanmis paylasimlar AYRI tabloda tutulur ve panelde
 // HIC gorunmuyordu ("15 reels planladim ama sistemde yok" sikayeti).
 // GET: bu hesabin kuyrugu (yaklasan + son yayinlananlar)
+// PATCH: caption ve/veya yayin saatini duzenler — YALNIZCA container'i HENUZ
+//   OLUSTURULMAMIS (ig_container_id IS NULL) 'pending' kayitlarda. Container
+//   olustuktan sonra caption Instagram tarafina gecmis olur; DB'de degistirmek
+//   yaniltici olurdu (panelde farkli, IG'de farkli metin).
 // DELETE ?id=: yalnizca HENUZ YAYINLANMAMIS kaydi iptal eder.
 //   Yayinlanmis (published) kayit SILINMEZ — IG'deki gonderiye dokunmaz ama
 //   tekrar-paylasim korumasinin gecmisi olarak durmalidir.
@@ -52,6 +56,76 @@ export async function GET(request: NextRequest) {
       hatali: posts.filter((p: any) => p.status === "error").length,
     },
   })
+}
+
+export async function PATCH(request: NextRequest) {
+  const { id, caption, scheduledAt } = await request.json().catch(() => ({}))
+  if (!id) return NextResponse.json({ error: "id gerekli" }, { status: 400 })
+  if (caption === undefined && scheduledAt === undefined) {
+    return NextResponse.json({ error: "değişiklik yok" }, { status: 400 })
+  }
+
+  const supabase = await getSupabaseServerClient()
+  const { data: row } = await supabase
+    .from("scheduled_posts")
+    .select("id, status, ig_container_id, user_id_s:user_id::text")
+    .eq("id", id)
+    .single()
+  if (!row) return NextResponse.json({ error: "kayıt bulunamadı" }, { status: 404 })
+
+  const own = await requireOwner(supabase, request, row.user_id_s)
+  if (!own.ok) return NextResponse.json({ error: own.error }, { status: own.status })
+
+  if (row.status !== "pending") {
+    return NextResponse.json(
+      { error: `Bu kayıt düzenlenemez (durum: ${row.status}) — yalnızca bekleyen paylaşımlar değiştirilebilir` },
+      { status: 409 },
+    )
+  }
+  if (row.ig_container_id) {
+    return NextResponse.json(
+      { error: "Instagram yükleme hazırlığı başlamış, metin artık değiştirilemez" },
+      { status: 409 },
+    )
+  }
+
+  const updates: any = {}
+
+  if (caption !== undefined) {
+    if (typeof caption !== "string") return NextResponse.json({ error: "caption metin olmalı" }, { status: 400 })
+    if (caption.length > 2200) {
+      return NextResponse.json({ error: "Açıklama en fazla 2200 karakter olabilir (Instagram sınırı)" }, { status: 400 })
+    }
+    updates.caption = caption
+  }
+
+  if (scheduledAt !== undefined) {
+    const t = new Date(scheduledAt)
+    if (isNaN(t.getTime())) return NextResponse.json({ error: "geçersiz tarih" }, { status: 400 })
+    // Gecmis saat = "ilk cron kosusunda yayinla" demek; bilincli bir secim
+    // olabilir ama 7 gunden eski tarih kazara girilmis demektir.
+    if (t.getTime() < Date.now() - 7 * 86400_000) {
+      return NextResponse.json({ error: "Tarih çok eski görünüyor, kontrol edin" }, { status: 400 })
+    }
+    updates.scheduled_at = t.toISOString()
+  }
+
+  // CAS: yalnizca hala 'pending' ve container'siz ise yaz (cron bu arada
+  // kaydi kapmis olabilir — yayinlanmakta olan gonderinin metnini degistirme)
+  const { data: updated, error } = await supabase
+    .from("scheduled_posts")
+    .update(updates)
+    .eq("id", id)
+    .eq("status", "pending")
+    .is("ig_container_id", null)
+    .select("id, caption, scheduled_at")
+    .single()
+
+  if (error || !updated) {
+    return NextResponse.json({ error: "Kayıt bu sırada yayına alınmış, değişiklik uygulanmadı" }, { status: 409 })
+  }
+
+  return NextResponse.json({ ok: true, post: { id: updated.id, caption: updated.caption, scheduledAt: updated.scheduled_at } })
 }
 
 export async function DELETE(request: NextRequest) {
