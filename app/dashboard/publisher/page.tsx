@@ -1,6 +1,7 @@
 "use client"
 
 import { ContentPool } from "@/components/dashboard/ContentPool"
+import { ScheduledQueue } from "@/components/dashboard/ScheduledQueue"
 import { SchedulerSettings } from "@/components/dashboard/SchedulerSettings"
 import { useInstagramSession } from "@/hooks/use-instagram-session"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -39,6 +40,7 @@ export default function PublisherPage() {
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 space-y-6">
+                    <ScheduledQueue userId={userId} />
                     <ContentPool userId={userId} />
                 </div>
 
