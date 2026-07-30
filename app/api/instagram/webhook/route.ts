@@ -72,6 +72,37 @@ import { keywordMatches } from "@/lib/tr-match"
 // Hesap basina mesaj ozellestirmesi: public cevap varyasyonlari (maks 5)
 // + takip kapisi karti metin/butonlari (dashboard > Özelleştirme'den yonetilir)
 const DEFAULT_PUBLIC_REPLIES = ["DM'ne bak! 📩", "Gönderdim, DM'ni kontrol et! 🔥", "DM kutuna düştü! ✨"]
+
+// ============================================================
+// 🎧 "I lost my AirPods" akimi: rastgele sanatci ses kaydi
+// Kural response_content.audio = { bucket, prefix } tasir; gonderim
+// aninda klasor listelenir, rastgele bir kayit secilir. Boylece yeni
+// ses eklemek icin kural degistirmek gerekmez - dosyayi yuklemek yeter.
+// ============================================================
+async function pickRandomAudio(
+  supabase: any,
+  audio: { bucket?: string; prefix?: string },
+): Promise<string | null> {
+  const bucket = audio.bucket || "sesler"
+  const prefix = (audio.prefix || "").replace(/^\/+|\/+$/g, "")
+  try {
+    const { data, error } = await supabase.storage.from(bucket).list(prefix, { limit: 200 })
+    if (error || !data) {
+      console.error("[v0] 🎧 ses listesi alinamadi:", error?.message)
+      return null
+    }
+    const sesler = data.filter((f: any) => /\.(mp3|m4a|aac|wav|ogg)$/i.test(f.name))
+    if (!sesler.length) return null
+    const secilen = sesler[Math.floor(Math.random() * sesler.length)]
+    const yol = prefix ? `${prefix}/${secilen.name}` : secilen.name
+    const { data: pub } = supabase.storage.from(bucket).getPublicUrl(yol)
+    return pub?.publicUrl || null
+  } catch (e) {
+    console.error("[v0] 🎧 pickRandomAudio hata:", e)
+    return null
+  }
+}
+
 async function getDmCustomization(supabase: any, user: any) {
   let data: any = null
   try {
@@ -884,7 +915,20 @@ export async function POST(request: NextRequest) {
 
           let replyTextLog = ""
 
-          if (content.message) {
+          if (content.audio) {
+            // 🎧 rastgele sanatci ses kaydi (AirPods akimi)
+            const sesUrl = await pickRandomAudio(supabase, content.audio)
+            if (sesUrl) {
+              apiBody.message = { attachment: { type: "audio", payload: { url: sesUrl } } }
+              replyTextLog = `[Ses] ${sesUrl.split("/").pop()}`
+            } else if (content.message) {
+              apiBody.message = { text: content.message }   // havuz bosken yedek metin
+              replyTextLog = content.message
+            } else {
+              console.log("[v0] 🎧 ses havuzu bos, cevap atlandi")
+              continue
+            }
+          } else if (content.message) {
             apiBody.message = { text: content.message }
             replyTextLog = content.message
           } else if (content.card) {
