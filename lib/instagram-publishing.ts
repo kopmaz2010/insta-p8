@@ -116,3 +116,37 @@ export async function publishContainer(accessToken: string, containerId: string)
 
     return data.id // The final Media ID
 }
+
+/**
+ * Tek gorsel container'i (carousel cocugu veya tek fotograf gonderisi).
+ * carouselItem=true ise gonderi olarak yayinlanmaz, CAROUSEL'e cocuk olur.
+ */
+export async function createImageContainer(accessToken: string, imageUrl: string, opts: { carouselItem?: boolean, caption?: string, aiGenerated?: boolean } = {}): Promise<string> {
+    const params = new URLSearchParams({ image_url: imageUrl, access_token: accessToken })
+    if (opts.carouselItem) params.append('is_carousel_item', 'true')
+    if (opts.caption) params.append('caption', opts.caption)
+    if (opts.aiGenerated) params.append('is_ai_generated', 'true')
+
+    const res = await fetch(`https://graph.instagram.com/me/media?${params.toString()}`, { method: 'POST' })
+    const data = await res.json()
+    if (data.error) throw new Error(`IG Image Container Error: ${data.error.message}`)
+    return data.id
+}
+
+/**
+ * Carousel (cok gorselli gonderi) ust container'i. children = cocuk container id'leri.
+ */
+export async function createCarouselContainer(accessToken: string, childIds: string[], caption: string, aiGenerated?: boolean): Promise<string> {
+    const params = new URLSearchParams({
+        media_type: 'CAROUSEL',
+        children: childIds.join(','),
+        caption: caption,
+        access_token: accessToken,
+    })
+    if (aiGenerated) params.append('is_ai_generated', 'true')
+
+    const res = await fetch(`https://graph.instagram.com/me/media?${params.toString()}`, { method: 'POST' })
+    const data = await res.json()
+    if (data.error) throw new Error(`IG Carousel Container Error: ${data.error.message}`)
+    return data.id
+}

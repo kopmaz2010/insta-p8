@@ -14,7 +14,7 @@
 
 import { NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
-import { createReelsContainer, getContainerStatus, publishContainer } from "@/lib/instagram-publishing"
+import { createReelsContainer, createImageContainer, createCarouselContainer, getContainerStatus, publishContainer } from "@/lib/instagram-publishing"
 import { checkCronSecret } from "@/lib/cron-auth"
 
 export const maxDuration = 60
@@ -47,13 +47,18 @@ export async function GET(request: Request) {
         continue
       }
 
-      // TEKRAR-PAYLASIM KORUMASI: ayni video bu hesapta zaten yayinlandiysa iptal
-      if (post.status === "pending") {
+      // CAROUSEL kayitlarinda video_url bostur; dedup/kayit anahtari ilk gorseldir
+      const images: string[] = Array.isArray(post.image_urls) ? post.image_urls : []
+      const isCarousel = post.media_type === "CAROUSEL"
+      const mediaKey = post.video_url || images[0] || null
+
+      // TEKRAR-PAYLASIM KORUMASI: ayni medya bu hesapta zaten yayinlandiysa iptal
+      if (post.status === "pending" && mediaKey) {
         const { data: dupe } = await supabase
           .from("reels_posts")
           .select("id")
           .eq("user_id", post.user_id)
-          .eq("video_url", post.video_url)
+          .eq("video_url", mediaKey)
           .in("status", ["PUBLISHED", "success"])
           .limit(1)
         if (dupe?.length) {
@@ -81,14 +86,28 @@ export async function GET(request: Request) {
           continue
         }
         try {
-          containerId = await createReelsContainer(
-            user.access_token,
-            post.video_url,
-            post.caption || "",
-            undefined,
-            post.as_trial ? "SS_PERFORMANCE" : null,
-            post.as_ai === true, // yapay zeka etiketi
-          )
+          if (isCarousel) {
+            // Cocuk gorseller sirayla (IG sirayi children parametresinden alir)
+            const childIds: string[] = []
+            for (const url of images.slice(0, 10)) {
+              childIds.push(await createImageContainer(user.access_token, url, { carouselItem: true }))
+            }
+            containerId = await createCarouselContainer(
+              user.access_token,
+              childIds,
+              post.caption || "",
+              post.as_ai === true, // yapay zeka etiketi
+            )
+          } else {
+            containerId = await createReelsContainer(
+              user.access_token,
+              post.video_url,
+              post.caption || "",
+              undefined,
+              post.as_trial ? "SS_PERFORMANCE" : null,
+              post.as_ai === true, // yapay zeka etiketi
+            )
+          }
         } catch (ce: any) {
           // container hic olusmadi → 'processing'de birakma; kayit kalici hataya
           // dusurulur ki kuyrugun basini sonsuza dek tikamasin (panelden gorunur)
@@ -121,7 +140,7 @@ export async function GET(request: Request) {
         // dupe korumasi reels_posts'a bakar — kurtarilan yayini da kaydet
         await supabase.from("reels_posts").insert({
           user_id: post.user_id,
-          video_url: post.video_url,
+          video_url: mediaKey,
           caption: post.caption,
           ig_container_id: containerId,
           status: "PUBLISHED",
@@ -184,7 +203,7 @@ export async function GET(request: Request) {
         .eq("id", post.id)
       await supabase.from("reels_posts").insert({
         user_id: post.user_id,
-        video_url: post.video_url,
+        video_url: mediaKey,
         caption: post.caption,
         ig_container_id: containerId,
         ig_media_id: mediaId,
