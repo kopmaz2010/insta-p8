@@ -103,7 +103,7 @@ export async function GET(request: Request) {
               user.access_token,
               post.video_url,
               post.caption || "",
-              undefined,
+              post.cover_url || undefined, // reels kapak gorseli (dikey)
               post.as_trial ? "SS_PERFORMANCE" : null,
               post.as_ai === true, // yapay zeka etiketi
             )
