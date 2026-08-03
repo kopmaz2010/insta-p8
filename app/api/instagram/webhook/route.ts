@@ -103,6 +103,35 @@ async function pickRandomAudio(
   }
 }
 
+
+// ============================================================
+// 🔇 SESSIZ KELIMELER
+// Bu kelimeleri iceren yoruma HICBIR otomasyon cevap vermez.
+// Kullanim: henuz tam surumu yayinlanmamis icerikler ("ikilem" gibi)
+// yanlis videoya yonlendirmesin. Liste DB'de: gamification_settings.
+// sessiz_kelimeler (text[]). Kod degistirmeden guncellenebilir.
+// ============================================================
+const sessizOnbellek = new Map<string, { kelimeler: string[]; zaman: number }>()
+
+async function sessizKelimeler(supabase: any, userId: string): Promise<string[]> {
+  const anahtar = String(userId)
+  const simdi = Date.now()
+  const onbellek = sessizOnbellek.get(anahtar)
+  if (onbellek && simdi - onbellek.zaman < 60_000) return onbellek.kelimeler
+  try {
+    const { data } = await supabase
+      .from("gamification_settings")
+      .select("sessiz_kelimeler")
+      .eq("user_id", userId)
+      .maybeSingle()
+    const kelimeler: string[] = Array.isArray(data?.sessiz_kelimeler) ? data.sessiz_kelimeler : []
+    sessizOnbellek.set(anahtar, { kelimeler, zaman: simdi })
+    return kelimeler
+  } catch {
+    return onbellek?.kelimeler || []
+  }
+}
+
 async function getDmCustomization(supabase: any, user: any) {
   let data: any = null
   try {
@@ -325,6 +354,13 @@ export async function POST(request: NextRequest) {
             // ============================================================
             // 🧠 SMART MATCHING LOGIC
             // ============================================================
+            // 🔇 Sessiz kelime kontrolu: eslesen yoruma hicbir cevap gitmez
+            const sessizler = await sessizKelimeler(supabase, user.id)
+            if (sessizler.length && sessizler.some((k) => keywordMatches(commentText, k))) {
+              console.log(`[v0] 🔇 Sessiz kelime yakalandi, yorum atlandi: "${commentText.slice(0, 40)}"`)
+              continue
+            }
+
             // Filter to comment-only automations first
             const commentAutomations = automations.filter((a: any) => a.trigger_source === 'comment')
 
