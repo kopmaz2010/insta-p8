@@ -20,6 +20,50 @@ import { checkCronSecret } from "@/lib/cron-auth"
 export const maxDuration = 60
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+
+/**
+ * Yayinlanan reel'in caption'indaki anahtar kelimeyi, ayni isimli yorum
+ * kuralina BAGLAR (specific_media_id). Boylece kural yalnizca kendi
+ * videosunda calisir.
+ *
+ * Neden: "Hepsi", "Manifest" gibi anahtarlar ayni zamanda gunluk Turkce
+ * kelime. Kural global kaldiginda baska bir videoya "Hepsi ❤️" yazan
+ * kisiye alakasiz video DM'i gidiyordu (ikilem vakasi, 3 Agu).
+ */
+async function anahtariVideoyaBagla(
+  supabase: any,
+  userId: string,
+  caption: string | null,
+  mediaId: string,
+) {
+  const m = (caption || "").match(/Yoruma\s+"([^"]+)"/)
+  if (!m) return
+  const anahtar = m[1].toLocaleLowerCase("tr-TR")
+  try {
+    const { data: kurallar } = await supabase
+      .from("automations")
+      .select("id, specific_media_id")
+      .eq("user_id", userId)
+      .eq("trigger_value", anahtar)
+      .eq("trigger_source", "comment")
+    if (!kurallar?.length) return
+
+    // Bu videoya zaten bagli bir kural varsa dokunma
+    if (kurallar.some((k: any) => k.specific_media_id === mediaId)) return
+
+    const bos = kurallar.find((k: any) => !k.specific_media_id)
+    if (bos) {
+      await supabase
+        .from("automations")
+        .update({ specific_media_id: mediaId, is_active: true })
+        .eq("id", bos.id)
+      console.log(`[SchedPosts] 🔗 "${anahtar}" kurali ${mediaId} videosuna baglandi`)
+    }
+  } catch (e) {
+    console.error("[SchedPosts] anahtar baglama hatasi:", e)
+  }
+}
+
 export async function GET(request: Request) {
   if (!checkCronSecret(request).ok) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   const supabase = await getSupabaseServerClient()
@@ -210,6 +254,7 @@ export async function GET(request: Request) {
         status: "PUBLISHED",
         published_at: nowIso,
       })
+      await anahtariVideoyaBagla(supabase, post.user_id, post.caption, mediaId)
       console.log(`[SchedPosts] 🟢 Yayinlandi: ${log.video} → ${mediaId}`)
       results.push({ ...log, status: "published", mediaId })
     } catch (e: any) {
