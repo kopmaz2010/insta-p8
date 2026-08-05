@@ -83,7 +83,7 @@ const DEFAULT_PUBLIC_REPLIES = ["DM'ne bak! 📩", "Gönderdim, DM'ni kontrol et
 async function pickRandomAudio(
   supabase: any,
   audio: { bucket?: string; prefix?: string },
-): Promise<string | null> {
+): Promise<{ url: string; name: string } | null> {
   const bucket = audio.bucket || "sesler"
   const prefix = (audio.prefix || "").replace(/^\/+|\/+$/g, "")
   try {
@@ -97,7 +97,7 @@ async function pickRandomAudio(
     const secilen = sesler[Math.floor(Math.random() * sesler.length)]
     const yol = prefix ? `${prefix}/${secilen.name}` : secilen.name
     const { data: pub } = supabase.storage.from(bucket).getPublicUrl(yol)
-    return pub?.publicUrl || null
+    return pub?.publicUrl ? { url: pub.publicUrl, name: secilen.name } : null
   } catch (e) {
     console.error("[v0] 🎧 pickRandomAudio hata:", e)
     return null
@@ -954,13 +954,19 @@ export async function POST(request: NextRequest) {
           const apiBody: any = { recipient: { id: senderId } }
 
           let replyTextLog = ""
+          // Ses sonrasi buton karti (Citizen the Artist tarzi): gonderilen
+          // SARKIYA ait Spotify/YouTube butonlari. Harita kuralda:
+          // content.audio.linkler = { "<dosya>": { baslik, spotify, youtube } }
+          // Yanlis sarkinin linki gitmesin diye dosya adiyla kilitli.
+          let sesLinkKarti: { baslik: string; spotify?: string; youtube?: string } | null = null
 
           if (content.audio) {
             // 🎧 rastgele sanatci ses kaydi (AirPods akimi)
-            const sesUrl = await pickRandomAudio(supabase, content.audio)
-            if (sesUrl) {
-              apiBody.message = { attachment: { type: "audio", payload: { url: sesUrl } } }
-              replyTextLog = `[Ses] ${sesUrl.split("/").pop()}`
+            const ses = await pickRandomAudio(supabase, content.audio)
+            if (ses) {
+              apiBody.message = { attachment: { type: "audio", payload: { url: ses.url } } }
+              replyTextLog = `[Ses] ${ses.name}`
+              sesLinkKarti = content.audio.linkler?.[ses.name] || null
             } else if (content.message) {
               apiBody.message = { text: content.message }   // havuz bosken yedek metin
               replyTextLog = content.message
@@ -1051,6 +1057,46 @@ export async function POST(request: NextRequest) {
               await recordRateLimitHit(supabase, user.id, json.error)
             } else {
               console.log("[v0] 🟢 Reply Sent!")
+
+              // 🎛️ SES SONRASI BUTON KARTI (Citizen the Artist tarzi):
+              // gonderilen sarkinin Spotify/YouTube butonlari. Kendi claim'i
+              // var (cift kart yok) ve send_dm sayilir (limitlere dahil).
+              if (sesLinkKarti && (await claimEvent(supabase, `send_${evKey}_link`, "send_dm", user.id))) {
+                await sleep(1500)
+                const kartMetin = (content.message || "Şarkının tamamı burada 👇").replace("{sarki}", sesLinkKarti.baslik)
+                const butonlar = [
+                  sesLinkKarti.spotify && { type: "web_url", url: sesLinkKarti.spotify, title: "Spotify'da Dinle" },
+                  sesLinkKarti.youtube && { type: "web_url", url: sesLinkKarti.youtube, title: "YouTube'da Dinle" },
+                ].filter(Boolean)
+                try {
+                  const resK = await fetch(
+                    `https://graph.instagram.com/v24.0/me/messages?access_token=${encodeURIComponent(user.access_token)}`,
+                    {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        recipient: { id: senderId },
+                        message: {
+                          attachment: {
+                            type: "template",
+                            payload: { template_type: "button", text: kartMetin, buttons: butonlar },
+                          },
+                        },
+                      }),
+                    },
+                  )
+                  const jsonK = await resK.json()
+                  if (jsonK.error) {
+                    console.error("[v0] 🔴 Link karti gonderilemedi:", jsonK.error)
+                    await recordRateLimitHit(supabase, user.id, jsonK.error)
+                  } else {
+                    console.log(`[v0] 🟢 Link karti gonderildi (${sesLinkKarti.baslik})`)
+                    replyTextLog += ` + [Butonlar] ${sesLinkKarti.baslik}`
+                  }
+                } catch (e) {
+                  console.error("[v0] Link karti ag hatasi:", e)
+                }
+              }
 
               // ============================================================
               // 💾 2. SAVE OUTGOING REPLY (Live Inbox Logic)
