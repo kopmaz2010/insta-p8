@@ -122,6 +122,26 @@ export async function isOptedOut(supabase: any, userId: any, igsid: any): Promis
 // Gunluk gonderim limiti (webhook'takiyle ayni mantik — gamification ici
 // gonderimler de ayni tavana tabidir)
 const DAILY_DM_LIMIT_G = Number(process.env.DAILY_DM_LIMIT || 150)
+
+// Hesaba ozel limit: users.daily_dm_limit / hourly_dm_limit dolu ise global
+// env yerine o gecerli. Otomasyonu yeni acilan hesap (or. boraduran) kokle
+// hesap tavanini gormesin diye (LIMIT-ARASTIRMASI §2.1 rampa mantigi).
+// 60 sn cache — her gonderimde ekstra sorgu atmamak icin.
+const limitCache: Record<string, { t: number; daily: number | null; hourly: number | null }> = {}
+export async function hesapLimitleri(supabase: any, userId: any): Promise<{ daily: number | null; hourly: number | null }> {
+  const k = String(userId)
+  const c = limitCache[k]
+  if (c && Date.now() - c.t < 60_000) return c
+  const { data } = await supabase
+    .from("users")
+    .select("daily_dm_limit, hourly_dm_limit")
+    .eq("id", userId)
+    .maybeSingle()
+  const v = { t: Date.now(), daily: data?.daily_dm_limit ?? null, hourly: data?.hourly_dm_limit ?? null }
+  limitCache[k] = v
+  return v
+}
+
 export async function underDailyLimitG(supabase: any, userId: any): Promise<boolean> {
   const dayStart = new Date()
   dayStart.setUTCHours(0, 0, 0, 0)
@@ -132,7 +152,8 @@ export async function underDailyLimitG(supabase: any, userId: any): Promise<bool
     .like("event_type", "send%")
     .gte("processed_at", dayStart.toISOString())
   if (error) return false // FAIL-CLOSED
-  return (count || 0) < DAILY_DM_LIMIT_G
+  const ozel = (await hesapLimitleri(supabase, userId)).daily
+  return (count || 0) < (ozel ?? DAILY_DM_LIMIT_G)
 }
 
 // POLITIKA: saatlik gonderim tavani (Faz 1 gunluk limitin saatlik esi)
@@ -148,7 +169,8 @@ export async function underHourlyLimit(supabase: any, userId: any): Promise<bool
     console.error("[v0] saatlik limit kontrol hatasi:", error)
     return false // FAIL-CLOSED: limit dogrulanamiyorsa gonderme
   }
-  return (count || 0) < HOURLY_DM_LIMIT
+  const ozel = (await hesapLimitleri(supabase, userId)).hourly
+  return (count || 0) < (ozel ?? HOURLY_DM_LIMIT)
 }
 
 // Gunluk puan-eylem tavani — sabit UTC gununde sifirlanir (rolling window degil).

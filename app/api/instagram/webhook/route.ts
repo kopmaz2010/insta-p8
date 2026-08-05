@@ -10,6 +10,7 @@ import {
   handleGamificationDM,
   isEmojiExpression,
   isOptedOut,
+  hesapLimitleri,
   rateLimitCoolingDown,
   recordRateLimitHit,
   underHourlyLimit,
@@ -178,7 +179,10 @@ async function underDailyLimit(supabase: any, userId: any): Promise<boolean> {
     console.error("[v0] limit kontrol hatasi:", error)
     return false // FAIL-CLOSED: limit dogrulanamiyorsa gonderme
   }
-  return (count || 0) < DAILY_DM_LIMIT
+  // users.daily_dm_limit dolu ise hesaba ozel tavan gecerli (rampa: yeni
+  // otomasyonlu hesap 1000'lik kokle-hesap tavanini gormesin)
+  const ozel = (await hesapLimitleri(supabase, userId)).daily
+  return (count || 0) < (ozel ?? DAILY_DM_LIMIT)
 }
 
 export async function GET(request: NextRequest) {
