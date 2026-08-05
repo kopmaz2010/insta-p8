@@ -25,16 +25,28 @@ export function foldTr(s: string): string {
     .replace(/ı/g, "i") // ı'nin decompose karsiligi yok, elle katla
 }
 
+// Uzatilmis harfleri tekle: "unutuuummm" -> "unutum". Hem mesaja hem
+// tetikleyiciye uygulanir ("unuttum" -> "unutum") — iki taraf ayni sekilde
+// katlandigi icin cift harfli Turkce kelimeler (elli->eli) tutarli kalir.
+// Kanit: 5 Agu, boraduran'da "kulaklığımı unutuuumm" tarzi ~55 DM eslesmedi.
+export function tekle(s: string): string {
+  return (s || "").replace(/(\p{L})\1+/gu, "$1")
+}
+
 export function keywordMatches(text: string, triggerValue: string): boolean {
   const t = foldTr(text)
+  const tK = tekle(t)
   return (triggerValue || "").split(",").some((k: string) => {
     const kw = foldTr(k.trim())
     if (!kw) return false
-    const esc = kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    try {
-      return new RegExp(`(?<![\\p{L}\\p{N}])${esc}(?![\\p{L}\\p{N}])`, "u").test(t)
-    } catch {
-      return t.includes(kw)
+    const dene = (metin: string, kelime: string) => {
+      const esc = kelime.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      try {
+        return new RegExp(`(?<![\\p{L}\\p{N}])${esc}(?![\\p{L}\\p{N}])`, "u").test(metin)
+      } catch {
+        return metin.includes(kelime)
+      }
     }
+    return dene(t, kw) || dene(tK, tekle(kw))
   })
 }
