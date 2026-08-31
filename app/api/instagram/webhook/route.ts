@@ -80,9 +80,23 @@ const DEFAULT_PUBLIC_REPLIES = ["DM'ne bak! 📩", "Gönderdim, DM'ni kontrol et
 // aninda klasor listelenir, rastgele bir kayit secilir. Boylece yeni
 // ses eklemek icin kural degistirmek gerekmez - dosyayi yuklemek yeter.
 // ============================================================
+// Math.random DEGIL: serverless izolasyonlarda Math.random ayni tohumla
+// baslayabiliyor — herkese "ayni sirayla rastgele" gitme kazasinin sebebi.
+function guvenliRastgele(n: number): number {
+  try {
+    const buf = new Uint32Array(1)
+    ;(globalThis as any).crypto.getRandomValues(buf)
+    return buf[0] % n
+  } catch {
+    return Math.floor(Math.random() * n)
+  }
+}
+
 async function pickRandomAudio(
   supabase: any,
   audio: { bucket?: string; prefix?: string },
+  // kimlik verilirse ayni kisiye tum kayitlar bitmeden ayni ses tekrar gitmez
+  kimlik?: { userId: any; senderId: string; ruleId: string },
 ): Promise<{ url: string; name: string } | null> {
   const bucket = audio.bucket || "sesler"
   const prefix = (audio.prefix || "").replace(/^\/+|\/+$/g, "")
@@ -94,7 +108,37 @@ async function pickRandomAudio(
     }
     const sesler = data.filter((f: any) => /\.(mp3|m4a|aac|wav|ogg)$/i.test(f.name))
     if (!sesler.length) return null
-    const secilen = sesler[Math.floor(Math.random() * sesler.length)]
+
+    // Kisiye ozel karistirma: son (N-1) gonderilen dislanir → havuz bitmeden
+    // tekrar yok, bitince yeni tur serbest. Sicil webhook_events'te
+    // (event_key: sesgecmis|<kural>|<kisi>|<ts>|<dosya>, benzersizlik ts ile).
+    let adaylar = sesler
+    if (kimlik) {
+      try {
+        const { data: gecmis } = await supabase
+          .from("webhook_events")
+          .select("event_key")
+          .eq("user_id", kimlik.userId)
+          .like("event_key", `sesgecmis|${kimlik.ruleId}|${kimlik.senderId}|%`)
+          .order("processed_at", { ascending: false })
+          .limit(sesler.length - 1)
+        const dinlenen = new Set((gecmis || []).map((r: any) => r.event_key.split("|").pop()))
+        const kalan = sesler.filter((f: any) => !dinlenen.has(f.name))
+        if (kalan.length) adaylar = kalan
+      } catch (e) {
+        console.error("[v0] 🎧 ses gecmisi okunamadi, tam havuzdan secilecek:", e)
+      }
+    }
+
+    const secilen = adaylar[guvenliRastgele(adaylar.length)]
+    if (kimlik) {
+      // kayit tut (recv_* tipi: gunluk send limitine sayilmasin)
+      await supabase.from("webhook_events").insert({
+        event_key: `sesgecmis|${kimlik.ruleId}|${kimlik.senderId}|${Date.now()}|${secilen.name}`,
+        event_type: "recv_ses_gecmis",
+        user_id: kimlik.userId,
+      }).then(({ error: e }: any) => { if (e) console.error("[v0] 🎧 ses gecmisi yazilamadi:", e.message) })
+    }
     const yol = prefix ? `${prefix}/${secilen.name}` : secilen.name
     const { data: pub } = supabase.storage.from(bucket).getPublicUrl(yol)
     return pub?.publicUrl ? { url: pub.publicUrl, name: secilen.name } : null
@@ -961,8 +1005,12 @@ export async function POST(request: NextRequest) {
           let sesLinkKarti: { baslik: string; spotify?: string; youtube?: string } | null = null
 
           if (content.audio) {
-            // 🎧 rastgele sanatci ses kaydi (AirPods akimi)
-            const ses = await pickRandomAudio(supabase, content.audio)
+            // 🎧 rastgele sanatci ses kaydi (AirPods akimi) — kisiye ozel karisik sira
+            const ses = await pickRandomAudio(supabase, content.audio, {
+              userId: user.id,
+              senderId,
+              ruleId: match.id,
+            })
             if (ses) {
               apiBody.message = { attachment: { type: "audio", payload: { url: ses.url } } }
               replyTextLog = `[Ses] ${ses.name}`
