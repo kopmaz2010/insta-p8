@@ -1147,6 +1147,42 @@ export async function POST(request: NextRequest) {
               }
 
               // ============================================================
+              // 📨 SES SONRASI TAKIP MESAJI — kisi basi OMUR BOYU 1 kez.
+              // Kural: response_content.takip_mesaji (metin) + opsiyonel
+              // takip_grup (ayni gruptaki kurallar tek sayac paylasir —
+              // Ozan/Sercan butonlarinin ikisine basana da TEK mesaj).
+              // Claim tarihsiz → gunluk degil, kalici. send_dm tipi:
+              // fail-closed + limitlere dahil.
+              // ============================================================
+              const sesGitti = Boolean(content.audio && apiBody.message?.attachment?.type === "audio")
+              if (sesGitti && content.takip_mesaji) {
+                const takipGrup = content.takip_grup || match.id
+                if (await claimEvent(supabase, `takip1|${user.id}|${takipGrup}|${senderId}`, "send_dm", user.id)) {
+                  await sleep(1500 + Math.random() * 1500)
+                  try {
+                    const resT = await fetch(
+                      `https://graph.instagram.com/v24.0/me/messages?access_token=${encodeURIComponent(user.access_token)}`,
+                      {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ recipient: { id: senderId }, message: { text: content.takip_mesaji } }),
+                      },
+                    )
+                    const jsonT = await resT.json()
+                    if (jsonT.error) {
+                      console.error("[v0] 🔴 Takip mesaji gonderilemedi:", jsonT.error)
+                      await recordRateLimitHit(supabase, user.id, jsonT.error)
+                    } else {
+                      console.log("[v0] 🟢 Takip mesaji gonderildi (ilk ve tek)")
+                      replyTextLog += " + [Takip mesaji]"
+                    }
+                  } catch (e) {
+                    console.error("[v0] Takip mesaji ag hatasi:", e)
+                  }
+                }
+              }
+
+              // ============================================================
               // 💾 2. SAVE OUTGOING REPLY (Live Inbox Logic)
               // ============================================================
               // We need to find the conversation ID again (or pass it down)
