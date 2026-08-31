@@ -131,20 +131,34 @@ async function pickRandomAudio(
     }
 
     const secilen = adaylar[guvenliRastgele(adaylar.length)]
-    if (kimlik) {
-      // kayit tut (recv_* tipi: gunluk send limitine sayilmasin)
-      await supabase.from("webhook_events").insert({
-        event_key: `sesgecmis|${kimlik.ruleId}|${kimlik.senderId}|${Date.now()}|${secilen.name}`,
-        event_type: "recv_ses_gecmis",
-        user_id: kimlik.userId,
-      }).then(({ error: e }: any) => { if (e) console.error("[v0] 🎧 ses gecmisi yazilamadi:", e.message) })
-    }
+    // NOT: sicil BURADA yazilmaz — gonderim limitlere takilirsa kisinin
+    // "dinledi" sayaci bosuna ilerlerdi (31 Agu: 393 secim / 210 gonderim).
+    // Kayit, gonderim BASARILI olunca sesGecmisiKaydet ile atilir.
     const yol = prefix ? `${prefix}/${secilen.name}` : secilen.name
     const { data: pub } = supabase.storage.from(bucket).getPublicUrl(yol)
     return pub?.publicUrl ? { url: pub.publicUrl, name: secilen.name } : null
   } catch (e) {
     console.error("[v0] 🎧 pickRandomAudio hata:", e)
     return null
+  }
+}
+
+// Basarili ses gonderiminden SONRA cagrilir — tekrarsiz karistirma sicili.
+// recv_* tipi: gunluk send limitine sayilmaz.
+async function sesGecmisiKaydet(
+  supabase: any,
+  kimlik: { userId: any; senderId: string; ruleId: string },
+  dosyaAdi: string,
+) {
+  try {
+    const { error } = await supabase.from("webhook_events").insert({
+      event_key: `sesgecmis|${kimlik.ruleId}|${kimlik.senderId}|${Date.now()}|${dosyaAdi}`,
+      event_type: "recv_ses_gecmis",
+      user_id: kimlik.userId,
+    })
+    if (error) console.error("[v0] 🎧 ses gecmisi yazilamadi:", error.message)
+  } catch (e) {
+    console.error("[v0] 🎧 ses gecmisi hata:", e)
   }
 }
 
@@ -1003,6 +1017,7 @@ export async function POST(request: NextRequest) {
           // content.audio.linkler = { "<dosya>": { baslik, spotify, youtube } }
           // Yanlis sarkinin linki gitmesin diye dosya adiyla kilitli.
           let sesLinkKarti: { baslik: string; spotify?: string; youtube?: string } | null = null
+          let sesSecilenAd: string | null = null
 
           if (content.audio) {
             // 🎧 rastgele sanatci ses kaydi (AirPods akimi) — kisiye ozel karisik sira
@@ -1014,6 +1029,7 @@ export async function POST(request: NextRequest) {
             if (ses) {
               apiBody.message = { attachment: { type: "audio", payload: { url: ses.url } } }
               replyTextLog = `[Ses] ${ses.name}`
+              sesSecilenAd = ses.name
               sesLinkKarti = content.audio.linkler?.[ses.name] || null
             } else if (content.message) {
               apiBody.message = { text: content.message }   // havuz bosken yedek metin
@@ -1155,6 +1171,10 @@ export async function POST(request: NextRequest) {
               // fail-closed + limitlere dahil.
               // ============================================================
               const sesGitti = Boolean(content.audio && apiBody.message?.attachment?.type === "audio")
+              // Sicil: ses GERCEKTEN gittiyse yaz (limitte takilan denemeler sayaci ilerletmez)
+              if (sesGitti && sesSecilenAd) {
+                await sesGecmisiKaydet(supabase, { userId: user.id, senderId, ruleId: match.id }, sesSecilenAd)
+              }
               if (sesGitti && content.takip_mesaji) {
                 const takipGrup = content.takip_grup || match.id
                 if (await claimEvent(supabase, `takip1|${user.id}|${takipGrup}|${senderId}`, "send_dm", user.id)) {
