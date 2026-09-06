@@ -423,6 +423,19 @@ export async function POST(request: NextRequest) {
               continue
             }
 
+            // --- G1: yoruma puan — HER gercek yorum icin, kural eslesmesinden BAGIMSIZ ---
+            // (7 Eyl fix: eskiden yalnizca otomasyonla eslesen yorum puan aliyordu;
+            // "👏👏" gibi anahtar kelimesiz yorumlar liderlige hic yansimiyordu.)
+            // awardCommentPoints kendi icinde: uye cozumu, opt-out, gunluk tavan,
+            // takip sarti ve yorum-basina event_key dedup'i uygular.
+            const award = await awardCommentPoints({
+              supabase,
+              user,
+              senderId,
+              commentId,
+              username: change.value.from?.username,
+            })
+
             // Filter to comment-only automations first
             const commentAutomations = automations.filter((a: any) => a.trigger_source === 'comment')
 
@@ -549,16 +562,7 @@ export async function POST(request: NextRequest) {
               }
               // === /FOLLOW GATE ===
 
-              // --- G1: yoruma puan (benzersiz eylem + gunluk tavan + takip sarti) ---
-              // once_ dedup'indan ONCE calisir: DM bugun zaten gittiyse bile farkli
-              // gonderiye yapilan benzersiz yorum puan kazandirir (event_key korumali).
-              const award = await awardCommentPoints({
-                supabase,
-                user,
-                senderId,
-                commentId,
-                username: change.value.from?.username,
-              })
+              // (yorum puani artik yukarida, eslesmeden bagimsiz verildi — `award` oradan geliyor)
 
               // --- FAZ1: ayni kisiye ayni kuraldan gunde 1 teslimat ---
               const dgun = new Date().toISOString().slice(0, 10)
