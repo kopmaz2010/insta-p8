@@ -394,31 +394,9 @@ export async function awardReactionPoints(ctx: { supabase: any; user: any; sende
     const pts = await insertBucket(supabase, member, settings.pts_reaction, "ifade", `pt_ifade_${member.id}_${day}`, settings)
     if (pts <= 0) return 0
     console.log(`[v0] ⭐ +${pts} ifade puani: ${member.username || senderId}`)
-    // Gunun ilk ifadesine kisa tesekkur — limitler + devre kesici gozetilir
-    if (
-      (await underDailyLimitG(supabase, user.id)) &&
-      (await underHourlyLimit(supabase, user.id)) &&
-      !(await rateLimitCoolingDown(supabase, user.id))
-    ) {
-      const { error: sendClaim } = await supabase
-        .from("webhook_events")
-        .insert({ event_key: `send_ifade_${member.id}_${day}`, event_type: "send_dm", user_id: user.id })
-      if (!sendClaim) {
-        await sleep(2000 + Math.random() * 4000)
-        try {
-          const res = await fetch(`${GRAPH}/me/messages?access_token=${encodeURIComponent(user.access_token)}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              recipient: { id: senderId },
-              message: { text: `⭐ +${pts} puan! İfaden için teşekkürler 🎶 Bakiyen için "PUAN" yazabilirsin.` },
-            }),
-          })
-          const json = await res.json()
-          if (json.error) await recordRateLimitHit(supabase, user.id, json.error)
-        } catch {}
-      }
-    }
+    // 7 Eyl 2026 (Ismail): puan bildirimi GONDERILMEZ — normal sohbetlerin arasina
+    // "+3 puan!" mesaji dusuyordu. Puan sessizce yazilir; kisi "PUAN"/"LIDERLIK"
+    // yazinca gorur. (Eski tesekkur DM'i bilerek kaldirildi.)
     return pts
   } catch (e) {
     console.error("[v0] awardReactionPoints hatasi:", e)

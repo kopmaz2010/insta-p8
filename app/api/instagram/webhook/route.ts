@@ -574,8 +574,10 @@ export async function POST(request: NextRequest) {
               await sleep(1500 + Math.random() * 2500)
 
               // Ozellestirilebilir public cevap varyasyonlari (dashboard > Özelleştirme, maks 5)
-              let randomReply = cust.publicReplies[Math.floor(Math.random() * cust.publicReplies.length)]
-              if (award) randomReply += ` ⭐ +${award.pts} puan kazandın, DM'den "PUAN" yaz!`
+              const randomReply = cust.publicReplies[Math.floor(Math.random() * cust.publicReplies.length)]
+              // 7 Eyl 2026 (Ismail): "+X puan kazandın" eki kaldirildi — puan sessiz
+              // birikir, isteyen "PUAN"/"LIDERLIK" ile gorur. (award sadece loglanir)
+              if (award) console.log(`[v0] ⭐ yorum puani sessiz yazildi: +${award.pts} → ${senderId}`)
 
               // Public Reply
               try {
