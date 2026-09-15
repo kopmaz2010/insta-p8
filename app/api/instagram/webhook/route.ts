@@ -206,6 +206,18 @@ async function sessizKelimeler(supabase: any, userId: string): Promise<string[]>
 
 // 16 Eyl: kural ve DM ayarlari her mesajda okunuyordu → hesap basina 60 sn onbellek.
 // Kural degisikligi en gec 60 sn icinde gecerli olur. Kopya donulur (paylasilan nesne degismesin).
+// 16 Eyl: DB devre kesici. DB 522/zaman asimi verince bu fonksiyon ornegi 60 sn
+// DB'ye hic dokunmaz; boylece kotasi tukenen veritabani toparlanabilir.
+let dbKapaliBitis = 0
+function dbBaglantiHatasi(e: any): boolean {
+  if (!e) return false
+  const metin = `${e.message || ""} ${e.details || ""} ${e.hint || ""}`
+  return !e.code || /fetch failed|timeout|timed out|522|520|503|ECONN|socket|<!DOCTYPE/i.test(metin)
+}
+function dbDevreKesici(e: any) {
+  dbKapaliBitis = Date.now() + 60_000
+  console.error("[v0] 🔌 DB yanit vermiyor, 60 sn devre kesici acildi:", String(e?.message || e).slice(0, 160))
+}
 const hesapOnbellek: Record<string, { t: number; data: any }> = {}
 const kuralOnbellek: Record<string, { t: number; data: any[] }> = {}
 async function aktifKurallar(supabase: any, userId: any): Promise<any[]> {
@@ -252,6 +264,11 @@ async function claimEvent(supabase: any, key: string, type: string, userId: any)
   const { error } = await supabase.from("webhook_events").insert({ event_key: key, event_type: type, user_id: userId })
   if (!error) return true
   if (error.code === "23505") return false // zaten islenmis
+  if (dbBaglantiHatasi(error)) {
+    // DB erisilemiyor: fail-open burada yuku katliyordu (her olay DB'ye yeniden yuklenir) → kesici
+    dbDevreKesici(error)
+    return false
+  }
   console.error("[v0] claimEvent hatasi:", error)
   // Beklenmedik DB hatasi:
   //  - GELEN event (recv_*): FAIL-OPEN → mesaji isle. Aksi halde gecici bir DB
@@ -324,6 +341,10 @@ export async function POST(request: NextRequest) {
 
 // Webhook govdesini isler (POST icinden after() ile cagrilir).
 async function webhookIsle(body: any, supabase: any) {
+  if (Date.now() < dbKapaliBitis) {
+    console.warn("[v0] 🔌 DB devre kesici acik, webhook olayi atlandi")
+    return
+  }
     for (const entry of body.entry) {
       // ============================================================
       // 🔇 ECHO SILENCER (The Fix for "ID Not Found" logs)
@@ -359,11 +380,15 @@ async function webhookIsle(body: any, supabase: any) {
       if (hesapOnb && Date.now() - hesapOnb.t < 60_000) {
         user = structuredClone(hesapOnb.data)
       } else {
-        const { data: bulunan } = await supabase
+        const { data: bulunan, error: hesapHata } = await supabase
           .from("users")
           .select("*, id_s:id::text")
           .or(`business_account_id.eq.${webhookIdSafe},page_id.eq.${webhookIdSafe}`)
           .single()
+        if (hesapHata && hesapHata.code !== "PGRST116" && dbBaglantiHatasi(hesapHata)) {
+          dbDevreKesici(hesapHata)
+          return
+        }
         user = bulunan
         if (bulunan) hesapOnbellek[webhookIdSafe] = { t: Date.now(), data: structuredClone(bulunan) }
       }
