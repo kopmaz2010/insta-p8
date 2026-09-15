@@ -206,6 +206,7 @@ async function sessizKelimeler(supabase: any, userId: string): Promise<string[]>
 
 // 16 Eyl: kural ve DM ayarlari her mesajda okunuyordu → hesap basina 60 sn onbellek.
 // Kural degisikligi en gec 60 sn icinde gecerli olur. Kopya donulur (paylasilan nesne degismesin).
+const hesapOnbellek: Record<string, { t: number; data: any }> = {}
 const kuralOnbellek: Record<string, { t: number; data: any[] }> = {}
 async function aktifKurallar(supabase: any, userId: any): Promise<any[]> {
   const k = String(userId)
@@ -352,11 +353,20 @@ async function webhookIsle(body: any, supabase: any) {
       // id_s: users.id BIGINT'i 2^53'u asar — JSON number'a cevrilirken YUVARLANIR
       // (hayranimsinapp ...486 vakasi: automations sorgusu 0 donuyordu). id her
       // zaman ::text olarak da cekilir ve asagida user.id'ye yazilir.
-      let { data: user } = await supabase
-        .from("users")
-        .select("*, id_s:id::text")
-        .or(`business_account_id.eq.${webhookIdSafe},page_id.eq.${webhookIdSafe}`)
-        .single()
+      // 16 Eyl: her webhook'ta users okunuyordu (3 saatte ~3.900) → hesap basina 60 sn onbellek (yalniz birincil eslesme)
+      let user: any = null
+      const hesapOnb = hesapOnbellek[webhookIdSafe]
+      if (hesapOnb && Date.now() - hesapOnb.t < 60_000) {
+        user = structuredClone(hesapOnb.data)
+      } else {
+        const { data: bulunan } = await supabase
+          .from("users")
+          .select("*, id_s:id::text")
+          .or(`business_account_id.eq.${webhookIdSafe},page_id.eq.${webhookIdSafe}`)
+          .single()
+        user = bulunan
+        if (bulunan) hesapOnbellek[webhookIdSafe] = { t: Date.now(), data: structuredClone(bulunan) }
+      }
 
       // ============================================================
       // 🔍 FALLBACK 1: Extract actual IG ID from payload
