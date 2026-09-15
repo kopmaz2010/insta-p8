@@ -1,6 +1,6 @@
 /* @ts-nocheck */
 
-import { type NextRequest, NextResponse } from "next/server"
+import { type NextRequest, NextResponse, after } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
 import crypto from "crypto"
 import {
@@ -266,6 +266,26 @@ export async function POST(request: NextRequest) {
     if (!body.entry) return NextResponse.json({ ok: true })
     const supabase = await getSupabaseServerClient()
 
+    // 16 Eyl 2026: Meta'ya HEMEN 200 don, isi arka planda yap.
+    // Eskiden tum islem bitince donuluyordu; DB yavaslayinca cevap gecikiyor,
+    // Meta ayni olayi tekrar tekrar yolluyor ve DB'nin G/C kotasi tukeniyordu
+    // (14-15 Eyl kesintileri). Dedup zaten claimEvent ile yapiliyor.
+    after(async () => {
+      try {
+        await webhookIsle(body, supabase)
+      } catch (e) {
+        console.error("[v0] Webhook Error (arka plan)", e)
+      }
+    })
+    return NextResponse.json({ ok: true })
+  } catch (error) {
+    console.error("[v0] Webhook Error", error)
+    return NextResponse.json({ ok: true })
+  }
+}
+
+// Webhook govdesini isler (POST icinden after() ile cagrilir).
+async function webhookIsle(body: any, supabase: any) {
     for (const entry of body.entry) {
       // ============================================================
       // 🔇 ECHO SILENCER (The Fix for "ID Not Found" logs)
@@ -1242,9 +1262,4 @@ export async function POST(request: NextRequest) {
         }
       }
     }
-    return NextResponse.json({ ok: true })
-  } catch (error) {
-    console.error("[v0] Webhook Error", error)
-    return NextResponse.json({ ok: true })
-  }
 }
