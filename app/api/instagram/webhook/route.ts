@@ -92,6 +92,22 @@ function guvenliRastgele(n: number): number {
   }
 }
 
+// Ses klasoru listesi onbellegi (16 Eyl): her mesajda storage list cagrisi
+// DB G/C kotasini yiyordu (3 saatte 1.400 list). Fonksiyon ornegi basina 5 dk.
+const sesListesiOnbellek: Record<string, { t: number; data: any[] }> = {}
+async function sesListesi(supabase: any, bucket: string, prefix: string): Promise<any[] | null> {
+  const k = `${bucket}/${prefix}`
+  const c = sesListesiOnbellek[k]
+  if (c && Date.now() - c.t < 300_000) return c.data
+  const { data, error } = await supabase.storage.from(bucket).list(prefix, { limit: 200 })
+  if (error || !data) {
+    console.error("[v0] 🎧 ses listesi alinamadi:", error?.message)
+    return c ? c.data : null // eski liste varsa onu kullan
+  }
+  sesListesiOnbellek[k] = { t: Date.now(), data }
+  return data
+}
+
 async function pickRandomAudio(
   supabase: any,
   audio: { bucket?: string; prefix?: string },
@@ -101,11 +117,8 @@ async function pickRandomAudio(
   const bucket = audio.bucket || "sesler"
   const prefix = (audio.prefix || "").replace(/^\/+|\/+$/g, "")
   try {
-    const { data, error } = await supabase.storage.from(bucket).list(prefix, { limit: 200 })
-    if (error || !data) {
-      console.error("[v0] 🎧 ses listesi alinamadi:", error?.message)
-      return null
-    }
+    const data = await sesListesi(supabase, bucket, prefix)
+    if (!data) return null
     const sesler = data.filter((f: any) => /\.(mp3|m4a|aac|wav|ogg)$/i.test(f.name))
     if (!sesler.length) return null
 
@@ -191,12 +204,36 @@ async function sessizKelimeler(supabase: any, userId: string): Promise<string[]>
   }
 }
 
+// 16 Eyl: kural ve DM ayarlari her mesajda okunuyordu → hesap basina 60 sn onbellek.
+// Kural degisikligi en gec 60 sn icinde gecerli olur. Kopya donulur (paylasilan nesne degismesin).
+const kuralOnbellek: Record<string, { t: number; data: any[] }> = {}
+async function aktifKurallar(supabase: any, userId: any): Promise<any[]> {
+  const k = String(userId)
+  const c = kuralOnbellek[k]
+  if (c && Date.now() - c.t < 60_000) return structuredClone(c.data)
+  const { data, error } = await supabase.from("automations").select("*").eq("user_id", userId).eq("is_active", true)
+  if (error) {
+    console.error("[v0] kurallar okunamadi:", error.message)
+    return c ? structuredClone(c.data) : []
+  }
+  kuralOnbellek[k] = { t: Date.now(), data: data || [] }
+  return structuredClone(data || [])
+}
+
+const dmAyarOnbellek: Record<string, { t: number; data: any }> = {}
 async function getDmCustomization(supabase: any, user: any) {
   let data: any = null
-  try {
-    const res = await supabase.from("dm_customization").select("*").eq("user_id", user.id).single()
-    data = res.data
-  } catch {}
+  const dk = String(user.id)
+  const dc = dmAyarOnbellek[dk]
+  if (dc && Date.now() - dc.t < 60_000) {
+    data = dc.data
+  } else {
+    try {
+      const res = await supabase.from("dm_customization").select("*").eq("user_id", user.id).single()
+      data = res.data
+      dmAyarOnbellek[dk] = { t: Date.now(), data }
+    } catch {}
+  }
   const replies = (data?.public_replies || []).filter((r: string) => r && r.trim()).slice(0, 5)
   return {
     publicReplies: replies.length ? replies : DEFAULT_PUBLIC_REPLIES,
@@ -404,11 +441,7 @@ async function webhookIsle(body: any, supabase: any) {
       // BIGINT hassasiyet fix'i: sorgularda kullanilacak id = kayipsiz text
       if (user.id_s) user.id = user.id_s
 
-      const { data: automations } = await supabase
-        .from("automations")
-        .select("*")
-        .eq("user_id", user.id)
-        .eq("is_active", true)
+      const automations = await aktifKurallar(supabase, user.id)
 
       if (!automations?.length) continue
 

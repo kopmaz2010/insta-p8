@@ -31,10 +31,21 @@ export function normalizeCommand(text: string): string {
 }
 
 // Hesap icin oyunlastirma acik mi? Kapaliysa null doner ve tum katman sessizce devre disi kalir.
+// 16 Eyl: her mesajda okunuyordu (3 saatte ~2.900 istek) → hesap basina 60 sn onbellek
+const gamiOnbellek: Record<string, { t: number; data: any }> = {}
 export async function getGamificationSettings(supabase: any, userId: any) {
-  const { data } = await supabase.from("gamification_settings").select("*").eq("user_id", userId).single()
+  const k = String(userId)
+  const c = gamiOnbellek[k]
+  let data: any
+  if (c && Date.now() - c.t < 60_000) {
+    data = c.data
+  } else {
+    const r = await supabase.from("gamification_settings").select("*").eq("user_id", userId).single()
+    data = r.data
+    gamiOnbellek[k] = { t: Date.now(), data }
+  }
   if (!data || data.active !== true) return null
-  return data
+  return structuredClone(data)
 }
 
 // IGSID'den gercek kullanici adini cek (liderlik tablosunda "Gizli Üye" kalmasin)
