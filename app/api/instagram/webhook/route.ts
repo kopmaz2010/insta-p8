@@ -652,10 +652,19 @@ async function webhookIsle(body: any, supabase: any) {
 
               // (yorum puani artik yukarida, eslesmeden bagimsiz verildi — `award` oradan geliyor)
 
-              // --- FAZ1: ayni kisiye ayni kuraldan gunde 1 teslimat ---
+              // --- FAZ1: ayni kisiye ayni kuraldan gunde N teslimat ---
+              // Varsayilan 1. Hesaba ozel: users.per_rule_daily_limit (3 Eki 2026,
+              // Ismail: fabrika_muzik icin 2). Ilk hak eski anahtarla ayni kalir
+              // (poller ve gecmis kayitlarla uyum), sonrakiler _2, _3... (tavan 5).
               const dgun = new Date().toISOString().slice(0, 10)
-              if (!(await claimEvent(supabase, `once_${match.id}_${senderId}_${dgun}`, "send_dm", user.id))) {
-                console.log(`[v0] ⏭️ Bugun zaten teslim edildi (kural ${match.id} → ${senderId})`)
+              const gunlukHak = Math.min(Math.max(Number(user.per_rule_daily_limit) || 1, 1), 5)
+              let hakAlindi = false
+              for (let h = 1; h <= gunlukHak && !hakAlindi; h++) {
+                const anahtar = `once_${match.id}_${senderId}_${dgun}${h === 1 ? "" : `_${h}`}`
+                hakAlindi = await claimEvent(supabase, anahtar, "send_dm", user.id)
+              }
+              if (!hakAlindi) {
+                console.log(`[v0] ⏭️ Bugunku hak doldu (${gunlukHak}/gun, kural ${match.id} → ${senderId})`)
                 continue
               }
               // --- FAZ1: insani gecikme ---

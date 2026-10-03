@@ -130,9 +130,15 @@ export async function GET(request: Request) {
         if (!(await underHourlyLimit(supabase, user.id))) break
         if (await rateLimitCoolingDown(supabase, user.id)) break
 
-        // kisi+kural gunde 1 teslimat (webhook'la ayni anahtar)
+        // kisi+kural gunde N teslimat (webhook'la ayni anahtarlar; varsayilan 1,
+        // hesaba ozel users.per_rule_daily_limit, tavan 5)
         const dgun = new Date().toISOString().slice(0, 10)
-        if (!(await claim(supabase, `once_${match.id}_${senderId}_${dgun}`, "send_dm", user.id))) continue
+        const gunlukHak = Math.min(Math.max(Number(user.per_rule_daily_limit) || 1, 1), 5)
+        let hakAlindi = false
+        for (let h = 1; h <= gunlukHak && !hakAlindi; h++) {
+          hakAlindi = await claim(supabase, `once_${match.id}_${senderId}_${dgun}${h === 1 ? "" : `_${h}`}`, "send_dm", user.id)
+        }
+        if (!hakAlindi) continue
 
         await sleep(1500 + Math.random() * 2500)
 
