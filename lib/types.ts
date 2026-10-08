@@ -29,7 +29,7 @@ export interface MediaSelection {
 export interface Automation {
   id: string
   name: string
-  trigger_source: 'comment' | 'dm' | 'story'  // NEW: Where the automation triggers
+  trigger_source: 'comment' | 'dm' | 'story' | 'tiktok_dm'  // NEW: Where the automation triggers (tiktok_dm: 8 Eki 2026)
   trigger_value: string
   trigger_type: 'keyword' | 'postback' | 'reply_all'  // Simplified types
   response_content: any
