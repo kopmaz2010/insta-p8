@@ -15,6 +15,9 @@ import type { NextRequest } from "next/server"
 
 const PUBLIC_PREFIXES = [
   "/api/instagram/webhook",  // Meta imza dogrulamasi kendi icinde
+  "/api/tiktok/webhook",     // TikTok imza dogrulamasi (Tiktok-Signature) kendi icinde (8 Eki 2026)
+  "/api/tiktok/callback",    // TikTok OAuth donusu — imzali state ile korunur
+  "/api/tiktok/sendpulse-webhook", // SendPulse koprusu — URL gizli anahtari ile korunur
   "/api/instagram/callback", // OAuth donusu (owner atamasi route icinde cookie'den)
   "/api/cron/",              // Vercel cron + GitHub Actions (opsiyonel CRON_SECRET)
   "/api/hooks/",             // x-api-secret ile korunuyor
