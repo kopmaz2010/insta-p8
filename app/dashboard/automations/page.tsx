@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect } from "react"
 import { useInstagramSession } from "@/hooks/use-instagram-session"
 import { AutomationList } from "@/components/dashboard/AutomationList"
 import { CreateRuleForm } from "@/components/dashboard/CreateRuleForm"
-import { MessageCircle, Send, Sparkles, Zap, Plus, Brain, Loader2 } from "lucide-react"
+import { MessageCircle, Send, Sparkles, Zap, Plus, Brain, Loader2, Music2 } from "lucide-react"
 import { IceBreakersManager } from "@/components/dashboard/IceBreakersManager"
 import type { Automation } from "@/lib/types"
 
@@ -12,7 +12,7 @@ export default function AutomationsPage() {
     const { userId, isLoading: isSessionLoading } = useInstagramSession()
     const [automations, setAutomations] = useState<Automation[]>([])
     const [isLoading, setIsLoading] = useState(true)
-    const [activeTab, setActiveTab] = useState<'comment' | 'dm' | 'story'>('comment')
+    const [activeTab, setActiveTab] = useState<'comment' | 'dm' | 'story' | 'tiktok_dm'>('comment')
     const [showCreateForm, setShowCreateForm] = useState(false)
     const [editingRule, setEditingRule] = useState<Automation | null>(null)
     const [aiEnabled, setAiEnabled] = useState(false)
@@ -78,12 +78,15 @@ export default function AutomationsPage() {
         comment: automations.filter(a => a.trigger_source === 'comment').length,
         dm: automations.filter(a => a.trigger_source === 'dm').length,
         story: automations.filter(a => a.trigger_source === 'story').length,
+        tiktok_dm: automations.filter(a => a.trigger_source === 'tiktok_dm').length,
     }
 
     const tabs = [
         { key: 'comment' as const, icon: <MessageCircle className="w-4 h-4" />, label: 'Comments', count: counts.comment },
         { key: 'dm' as const, icon: <Send className="w-4 h-4" />, label: 'DMs', count: counts.dm },
         { key: 'story' as const, icon: <Sparkles className="w-4 h-4" />, label: 'Stories', count: counts.story },
+        // TikTok DM (8 Eki 2026): kendi adaptor — /api/tiktok/webhook. Yalniz metin cevap.
+        { key: 'tiktok_dm' as const, icon: <Music2 className="w-4 h-4" />, label: 'TikTok DM', count: counts.tiktok_dm },
     ]
 
     return (

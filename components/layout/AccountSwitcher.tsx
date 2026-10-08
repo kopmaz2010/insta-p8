@@ -17,13 +17,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { ChevronsUpDown, Plus, Check, AlertTriangle, Instagram } from "lucide-react"
+import { ChevronsUpDown, Plus, Check, AlertTriangle, Instagram, Music2 } from "lucide-react"
 import { instagramOAuthUrl } from "@/components/layout/landing-page"
 
 interface Account {
   id: string
   username: string
   healthy: boolean
+  tiktok?: { username: string | null; healthy: boolean } | null
 }
 
 export function AccountSwitcher() {
@@ -86,7 +87,14 @@ export function AccountSwitcher() {
             className="flex items-center gap-2 cursor-pointer focus:bg-white/10 focus:text-white"
           >
             <Instagram className="w-3.5 h-3.5 text-neutral-500" />
-            <span className="flex-1 truncate text-sm">@{acc.username}</span>
+            <span className="flex-1 truncate text-sm">
+              @{acc.username}
+              {acc.tiktok && (
+                <span className="ml-1 text-[10px] text-neutral-500" title={acc.tiktok.healthy ? "TikTok bağlı" : "TikTok token sorunlu"}>
+                  · TikTok{acc.tiktok.username ? ` @${acc.tiktok.username}` : ""}{acc.tiktok.healthy ? "" : " ⚠️"}
+                </span>
+              )}
+            </span>
             {!acc.healthy && (
               <span title="Token sorunlu — yeniden bağlanmalı">
                 <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
@@ -104,6 +112,14 @@ export function AccountSwitcher() {
           className="flex items-center gap-2 cursor-pointer text-neutral-300 focus:bg-white/10 focus:text-white"
         >
           <Plus className="w-3.5 h-3.5" /> Yeni hesap bağla
+        </DropdownMenuItem>
+        {/* TikTok (8 Eki 2026): secili Instagram hesabina TikTok hesabi baglanir (ayni sanatci, iki kanal) */}
+        <DropdownMenuItem
+          disabled={!activeId}
+          onClick={() => activeId && (window.location.href = `/api/tiktok/connect?user_id=${activeId}`)}
+          className="flex items-center gap-2 cursor-pointer text-neutral-300 focus:bg-white/10 focus:text-white"
+        >
+          <Music2 className="w-3.5 h-3.5" /> {accounts.find((a) => a.id === activeId)?.tiktok ? "TikTok'u yeniden bağla" : "TikTok hesabı bağla"}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

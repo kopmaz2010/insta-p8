@@ -14,7 +14,7 @@ import { toast } from "sonner"
 
 interface CreateRuleFormProps {
   userId: string
-  triggerSource: 'comment' | 'dm' | 'story'
+  triggerSource: 'comment' | 'dm' | 'story' | 'tiktok_dm' // tiktok_dm: yalniz metin cevap (8 Eki 2026)
   onSuccess: () => void
   editRule?: any | null // doluysa form DUZENLEME modunda calisir (PUT); parent key={} ile remount etmeli
 }
@@ -42,6 +42,7 @@ export function CreateRuleForm({ userId, triggerSource, onSuccess, editRule }: C
 
   // Step 2: Response
   const [type, setType] = useState<"text" | "card">(erContent.card ? "card" : "text")
+  useEffect(() => { if (triggerSource === 'tiktok_dm') setType("text") }, [triggerSource])
   const [messageText, setMessageText] = useState(erContent.message || "")
   const [cardTitle, setCardTitle] = useState(erContent.card?.title || "")
   const [cardSubtitle, setCardSubtitle] = useState(erContent.card?.subtitle || "")
@@ -330,6 +331,7 @@ export function CreateRuleForm({ userId, triggerSource, onSuccess, editRule }: C
         <h3 className="text-lg font-bold text-white mb-1">
           {triggerSource === 'comment' ? '💬 When to reply?' :
             triggerSource === 'dm' ? '📩 When to reply?' :
+              triggerSource === 'tiktok_dm' ? '🎵 TikTok DM — when to reply?' :
               '📸 Story trigger'}
         </h3>
         <p className="text-xs text-neutral-500">
@@ -337,7 +339,9 @@ export function CreateRuleForm({ userId, triggerSource, onSuccess, editRule }: C
             ? 'Auto-reply when someone comments these keywords.'
             : triggerSource === 'dm'
               ? 'Auto-reply when someone DMs these keywords.'
-              : 'Engage when someone interacts with your story.'}
+              : triggerSource === 'tiktok_dm'
+                ? 'TikTok DM\'de bu kelimeler yazılınca METİN cevap gider (ses/kart/görsel yok; linki düz yaz: boraduran.net/ses).'
+                : 'Engage when someone interacts with your story.'}
         </p>
       </div>
 
@@ -469,6 +473,8 @@ export function CreateRuleForm({ userId, triggerSource, onSuccess, editRule }: C
         <button
           type="button"
           onClick={() => setType("card")}
+          disabled={triggerSource === 'tiktok_dm'}
+          title={triggerSource === 'tiktok_dm' ? 'TikTok DM yalnız metin destekler' : undefined}
           className={`p-3 rounded-xl border transition-all flex items-center gap-2 ${
             type === "card" ? 'border-white bg-white text-black' : 'border-white/10 text-neutral-400 hover:bg-white/5'
           }`}
